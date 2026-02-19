@@ -1,0 +1,31 @@
+name: English Master Otomatik Derleme
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  apk_olustur:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Kodu Buluttan Cek
+        uses: actions/checkout@v3
+
+      - name: Java (Android) Altyapisini Kur
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Flutter SDK Kurulumu
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.x'
+          channel: 'stable'
+
+      - name: Paketleri ve Eklentileri Indir
+        run: flutter pub get
+
+      - name: Android APK Derle
+        run: flutter build apk --release
