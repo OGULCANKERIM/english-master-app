@@ -19,7 +19,14 @@ List<Map<String, dynamic>> globalFavoriSahneler = [];
 // ==========================================
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(); // Firebase'i ayağa kaldırıyoruz
+  
+  // Firebase'i başlatmayı dener, hata çıkarsa uygulamanın çökmesini (siyah ekran) engeller.
+  try {
+    await Firebase.initializeApp(); 
+  } catch (e) {
+    print("Firebase Başlatılamadı: $e");
+  }
+  
   runApp(const IngilizceUygulamam());
 }
 
