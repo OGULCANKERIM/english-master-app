@@ -8,6 +8,7 @@ import 'package:video_player/video_player.dart';
 // --- GÜNCELLEME İÇİN GEREKLİ PAKETLER ---
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 // ==========================================
 // GLOBAL HAFIZA
@@ -134,7 +135,14 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
           TextButton(onPressed: () => Navigator.pop(context), child: const Text("SONRA")),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple, foregroundColor: Colors.white),
-            onPressed: () { /* Buraya indirme linki gelebilir */ },
+            onPressed: () async { 
+              // Şimdilik test için Google'a veya kendi sitene yönlendirebilirsin. 
+              // Uygulaman Play Store'a çıkınca buraya Play Store linki gelecek!
+              final Uri url = Uri.parse('https://appdistribution.firebase.google.com/');
+              if (await canLaunchUrl(url)) {
+                await launchUrl(url, mode: LaunchMode.externalApplication);
+              }
+            },
             child: const Text("GÜNCELLE"),
           ),
         ],
