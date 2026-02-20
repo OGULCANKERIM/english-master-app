@@ -2,6 +2,14 @@ plugins {
     id("com.android.application")
     id("kotlin-android")
     id("dev.flutter.flutter-gradle-plugin")
+
+    plugins {
+    id("com.android.application")
+    id("kotlin-android")
+    id("dev.flutter.flutter-gradle-plugin")
+    // AŞAĞIDAKİ SATIRI EKLE:
+    id("com.google.gms.google-services")
+}
 }
 
 android {
