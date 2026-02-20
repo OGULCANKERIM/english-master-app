@@ -340,7 +340,7 @@ class _FavorilerEkraniState extends State<FavorilerEkrani> {
       body: Container(
         width: double.infinity, height: double.infinity, decoration: BoxDecoration(color: Colors.grey[100]),
         child: globalFavoriSahneler.isEmpty 
-          ? Center(child: Padding(padding: const EdgeInsets.all(30.0), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.heart_broken_rounded, size: 80, color: Colors.grey[400]), const SizedBox(height: 20), Text("No favorites yet.", style: GoogleFonts.poppins(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.grey[600])), const SizedBox(height: 10), const Text("Watch videos and tap the heart icon to save them here!", textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.grey[500]))])))
+          ? Center(child: Padding(padding: const EdgeInsets.all(30.0), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.heart_broken_rounded, size: 80, color: Colors.grey[400]), const SizedBox(height: 20), Text("No favorites yet.", style: GoogleFonts.poppins(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.grey[600])), const SizedBox(height: 10), Text("Watch videos and tap the heart icon to save them here!", textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.grey[500]))])))
           : ListView.builder(
               padding: const EdgeInsets.symmetric(vertical: 10), itemCount: globalFavoriSahneler.length,
               itemBuilder: (context, index) {
