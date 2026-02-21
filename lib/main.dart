@@ -743,7 +743,7 @@ class _ReelsVideoOgesiState extends State<ReelsVideoOgesi> {
 }
 
 // ==========================================
-// YAPAY ZEKA DESTEKLİ KONUŞMA PRATİĞİ EKRANI
+// YAPAY ZEKA DESTEKLİ KONUŞMA PRATİĞİ EKRANI (GÜNCELLENDİ)
 // ==========================================
 class KonusmaPratigiEkrani extends StatefulWidget {
   const KonusmaPratigiEkrani({super.key});
@@ -761,10 +761,12 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
   final List<Map<String, String>> _mesajlar = [];
   bool _aiDusunuyor = false;
 
-  // GOOGLE GEMINI API ŞİFREN BURAYA EKLENDİ!
   final String apiKey = "AIzaSyBJH9mdLFIuf4b7BbaoBkSsSTNxULnxuoA"; 
   late GenerativeModel _model;
   late ChatSession _chat;
+
+  // Ses çeşitliliği için listeler
+  List<Map<dynamic, dynamic>> _ingilizceSesler = [];
 
   @override
   void initState() {
@@ -777,8 +779,30 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
 
   void _sesAyarlariniYap() async {
     await _flutterTts.setLanguage("en-US");
-    await _flutterTts.setPitch(1.1); 
-    await _flutterTts.setSpeechRate(0.45); 
+    await _flutterTts.setPitch(1.0); // Doğal ton
+    await _flutterTts.setSpeechRate(0.5); // TAM GÜNLÜK KONUŞMA HIZI (Sabit)
+
+    // Telefonda yüklü olan İngilizce sesleri (Farklı AI seslerini) bul
+    List<dynamic> sesler = await _flutterTts.getVoices;
+    List<Map<dynamic, dynamic>> filtrelenmis = [];
+    for (var ses in sesler) {
+      // Sadece İngilizce olanları al (en-US, en-GB, en-AU vb.)
+      if (ses["locale"] != null && ses["locale"].toString().startsWith("en-")) {
+        filtrelenmis.add(ses);
+      }
+    }
+    
+    if (mounted) {
+      setState(() { _ingilizceSesler = filtrelenmis; });
+    }
+  }
+
+  // Sağ üstteki menüden ses değiştirildiğinde çalışır
+  void _sesiDegistir(Map<dynamic, dynamic> yeniSes) async {
+    await _flutterTts.setVoice({"name": yeniSes["name"], "locale": yeniSes["locale"]});
+    // Her değiştirdiğinde hızı tekrar sabitliyoruz ki bozulmasın
+    await _flutterTts.setSpeechRate(0.5); 
+    _sesliOku("Hi! I am your new teacher."); 
   }
 
   void _yapayZekayiBaslat() {
@@ -799,32 +823,43 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
     });
   }
 
-  void _dinlemeyiBaslat() async {
-    bool available = await _speechToText.initialize(
-      onStatus: (status) => print('Durum: $status'),
-      onError: (errorNotification) => print('Hata: $errorNotification'),
-    );
-
-    if (available) {
-      setState(() => _isListening = true);
-      _speechToText.listen(
-        onResult: (result) {
-          setState(() {
-            _kullaniciMetni = result.recognizedWords;
-          });
-          if (result.finalResult) {
-            _isListening = false;
+  // Yeni Mikrofona Dokunma (Toggle) Mantığı
+  void _mikrofonuTetikle() async {
+    if (_isListening) {
+      _dinlemeyiDurdur(); // Zaten dinliyorsa durdur ve gönder
+    } else {
+      bool available = await _speechToText.initialize(
+        onStatus: (status) {
+          // Kullanıcı susarsa otomatik olarak göndermesi için
+          if (status == 'done') {
+            setState(() => _isListening = false);
             _yapayZekayaGonder(_kullaniciMetni);
           }
         },
-        localeId: "en_US", 
+        onError: (errorNotification) => print('Hata: $errorNotification'),
       );
+
+      if (available) {
+        setState(() {
+          _isListening = true;
+          _kullaniciMetni = "";
+        });
+        _speechToText.listen(
+          onResult: (result) {
+            setState(() { _kullaniciMetni = result.recognizedWords; });
+          },
+          localeId: "en_US", 
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Mikrofon izni alınamadı.")));
+      }
     }
   }
 
   void _dinlemeyiDurdur() {
     _speechToText.stop();
     setState(() => _isListening = false);
+    _yapayZekayaGonder(_kullaniciMetni);
   }
 
   Future<void> _yapayZekayaGonder(String mesaj) async {
@@ -837,13 +872,19 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
     });
 
     try {
-      final response = await _chat.sendMessage(Content.text(mesaj));
-      final aiCevabi = response.text ?? "I didn't understand that.";
+      // Mesajı içeriğe dönüştürüp gönderiyoruz
+      final content = [Content.text(mesaj)];
+      // Mevcut satırın yerine bunu dene:
+final response = await _chat.sendMessage(Content.text(mesaj));
+      
+      final aiCevabi = response.text ?? "I'm listening, but I couldn't form a sentence.";
       
       _mesajEkle("AI", aiCevabi);
       _sesliOku(aiCevabi);
     } catch (e) {
-      _mesajEkle("AI", "Oops! Connection error. Let's try again.");
+      // Hatanın tam nedenini görmek için mesajı güncelledik
+      print("AI Hatası: $e");
+      _mesajEkle("AI", "Error: ${e.toString().contains('403') ? 'API Key is not ready yet' : 'Connection problem'}.");
     } finally {
       setState(() => _aiDusunuyor = false);
     }
@@ -862,6 +903,30 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          // YEPYENİ: Sağ üst köşedeki Ses Değiştirme Menüsü
+          if (_ingilizceSesler.isNotEmpty)
+            PopupMenuButton<Map<dynamic, dynamic>>(
+              icon: const Icon(Icons.record_voice_over_rounded, color: Colors.white),
+              tooltip: "Change Teacher Voice",
+              onSelected: _sesiDegistir,
+              itemBuilder: (BuildContext context) {
+                // Sadece ilk 8 farklı sesi alıp kalabalığı önleyelim
+                return _ingilizceSesler.take(8).map((ses) {
+                  return PopupMenuItem<Map<dynamic, dynamic>>(
+                    value: ses,
+                    child: Row(
+                      children: [
+                        const Icon(Icons.person, color: Colors.deepPurple, size: 20),
+                        const SizedBox(width: 10),
+                        Text("Teacher (${ses["locale"]})"),
+                      ],
+                    ),
+                  );
+                }).toList();
+              },
+            )
+        ],
       ),
       body: Column(
         children: [
@@ -912,7 +977,7 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
             child: Column(
               children: [
                 Text(
-                  _isListening ? "Listening... (Speak in English)" : "Tap the mic and speak!",
+                  _isListening ? "Listening... (Tap to stop)" : "Tap to speak!",
                   style: GoogleFonts.poppins(color: _isListening ? Colors.greenAccent : Colors.grey[400], fontSize: 16),
                 ),
                 const SizedBox(height: 10),
@@ -922,9 +987,9 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 20),
+                // YENİ: Basılı tutmak yerine sadece dokunma mantığı
                 GestureDetector(
-                  onTapDown: (_) => _dinlemeyiBaslat(),
-                  onTapUp: (_) => _dinlemeyiDurdur(),
+                  onTap: _mikrofonuTetikle,
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 300),
                     padding: EdgeInsets.all(_isListening ? 30 : 20),
@@ -935,11 +1000,9 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
                         if (_isListening) BoxShadow(color: Colors.greenAccent.withOpacity(0.6), blurRadius: 20, spreadRadius: 10)
                       ]
                     ),
-                    child: Icon(Icons.mic_rounded, color: Colors.white, size: _isListening ? 50 : 40),
+                    child: Icon(_isListening ? Icons.stop_rounded : Icons.mic_rounded, color: Colors.white, size: _isListening ? 50 : 40),
                   ),
                 ),
-                const SizedBox(height: 10),
-                Text("Hold to speak", style: TextStyle(color: Colors.grey[500], fontSize: 12)),
               ],
             ),
           )
