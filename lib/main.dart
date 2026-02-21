@@ -5,10 +5,13 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_player/video_player.dart'; 
-// --- GÜNCELLEME İÇİN GEREKLİ PAKETLER ---
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:url_launcher/url_launcher.dart'; 
+
+// --- YENİ EKLENEN YAPAY ZEKA VE SES PAKETLERİ ---
+import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:google_generative_ai/google_generative_ai.dart';
 
 // ==========================================
 // GLOBAL HAFIZA
@@ -21,7 +24,6 @@ List<Map<String, dynamic>> globalFavoriSahneler = [];
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Firebase'i başlatmayı dener, hata çıkarsa uygulamanın çökmesini (siyah ekran) engeller.
   try {
     await Firebase.initializeApp(); 
   } catch (e) {
@@ -45,13 +47,142 @@ class IngilizceUygulamam extends StatelessWidget {
         textTheme: GoogleFonts.poppinsTextTheme(),
         scaffoldBackgroundColor: Colors.transparent,
       ),
-      home: const SeviyeliKelimeEkrani(),
+      home: const AnaMenuEkrani(), 
     );
   }
 }
 
 // ==========================================
-// ANA EKRAN (KELİME LİSTESİ VE GÜNCELLEME)
+// ANA MENÜ (DASHBOARD) EKRANI
+// ==========================================
+class AnaMenuEkrani extends StatelessWidget {
+  const AnaMenuEkrani({super.key});
+
+  Route _kayarakGecis(Widget sayfa) {
+    return PageRouteBuilder(
+      pageBuilder: (context, animation, secondaryAnimation) => sayfa,
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        const begin = Offset(1.0, 0.0); 
+        const end = Offset.zero;
+        const curve = Curves.easeInOutQuart;
+        var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+        return SlideTransition(position: animation.drive(tween), child: child);
+      },
+      transitionDuration: const Duration(milliseconds: 500),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFF0f0c29), Color(0xFF302b63), Color(0xFF24243e)],
+          ),
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 30.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), shape: BoxShape.circle),
+                      child: const Icon(Icons.language_rounded, color: Colors.white, size: 40),
+                    ),
+                    const SizedBox(width: 15),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text("Welcome Back,", style: GoogleFonts.poppins(color: Colors.grey[400], fontSize: 16)),
+                        Text("English Master", style: GoogleFonts.poppins(color: Colors.white, fontSize: 26, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 40),
+                Text("What would you like to do?", style: GoogleFonts.poppins(color: Colors.white70, fontSize: 18, fontWeight: FontWeight.w500)),
+                const SizedBox(height: 20),
+                
+                Expanded(
+                  child: GridView.count(
+                    crossAxisCount: 2, 
+                    crossAxisSpacing: 15,
+                    mainAxisSpacing: 15,
+                    childAspectRatio: 0.9,
+                    children: [
+                      _menuKarti(
+                        baslik: "Vocabulary\nList",
+                        ikon: Icons.menu_book_rounded,
+                        renk: Colors.blueAccent,
+                        onTap: () => Navigator.push(context, _kayarakGecis(const SeviyeliKelimeEkrani())),
+                      ),
+                      _menuKarti(
+                        baslik: "Reels\nMode",
+                        ikon: Icons.play_circle_fill_rounded,
+                        renk: Colors.pinkAccent,
+                        onTap: () => Navigator.push(context, _kayarakGecis(const FilmKesitleriEkrani())),
+                      ),
+                      _menuKarti(
+                        baslik: "Favorite\nVideos",
+                        ikon: Icons.favorite_rounded,
+                        renk: Colors.redAccent,
+                        onTap: () => Navigator.push(context, _kayarakGecis(const FavorilerEkrani())),
+                      ),
+                      // YEPYENİ YAPAY ZEKA BUTONUMUZ
+                      _menuKarti(
+                        baslik: "Speaking\nPractice",
+                        ikon: Icons.mic_rounded,
+                        renk: Colors.greenAccent,
+                        onTap: () => Navigator.push(context, _kayarakGecis(const KonusmaPratigiEkrani())),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _menuKarti({required String baslik, required IconData ikon, required Color renk, required VoidCallback onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(25),
+          border: Border.all(color: Colors.white.withOpacity(0.1)),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(15),
+              decoration: BoxDecoration(color: renk.withOpacity(0.2), shape: BoxShape.circle),
+              child: Icon(ikon, size: 40, color: renk),
+            ),
+            const SizedBox(height: 15),
+            Text(baslik, textAlign: TextAlign.center, style: GoogleFonts.poppins(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// KELİME LİSTESİ EKRANI
 // ==========================================
 class SeviyeliKelimeEkrani extends StatefulWidget {
   const SeviyeliKelimeEkrani({super.key});
@@ -61,17 +192,17 @@ class SeviyeliKelimeEkrani extends StatefulWidget {
 }
 
 class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
-  FlutterTts flutterTts = FlutterTts();
-  List<dynamic> tumKelimeler = [];
-  bool isLoading = true;
-  String hataMesaji = "";
+  FlutterTts flutterTts = FlutterTts(); 
+  List<dynamic> tumKelimeler = []; 
+  bool isLoading = true; 
+  String hataMesaji = ""; 
 
   String seciliSeviye = "A1";
   String seciliTur = "All";
   String seciliHarf = "All"; 
 
-  int index = 0;
-  bool anlamigoster = false;
+  int index = 0; 
+  bool anlamigoster = false; 
   
   String? sonOkunanMetin;
   bool okumaYapiliyor = false;
@@ -97,12 +228,25 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
   @override
   void initState() {
     super.initState();
-    kelimeleriGetir();
-    ayarlariYap();
-    _checkForUpdate(); // Açılışta güncelleme kontrolü
+    kelimeleriGetir(); 
+    ayarlariYap(); 
+    _checkForUpdate(); 
   }
 
-  // --- GÜNCELLEME KONTROL FONKSİYONU ---
+  Route _alttanKayarakGecis(Widget gidilecekSayfa) {
+    return PageRouteBuilder(
+      pageBuilder: (context, animation, secondaryAnimation) => gidilecekSayfa,
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        const begin = Offset(0.0, 1.0); 
+        const end = Offset.zero;
+        const curve = Curves.easeOutQuart; 
+        var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+        return SlideTransition(position: animation.drive(tween), child: child);
+      },
+      transitionDuration: const Duration(milliseconds: 600), 
+    );
+  }
+
   Future<void> _checkForUpdate() async {
     try {
       final remoteConfig = FirebaseRemoteConfig.instance;
@@ -116,7 +260,7 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
       String currentVersion = "1.0.0"; 
 
       if (newVersion != currentVersion && newVersion.isNotEmpty) {
-        _showUpdateDialog();
+        _showUpdateDialog(); 
       }
     } catch (e) {
       print("Güncelleme Hatası: $e");
@@ -126,7 +270,7 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
   void _showUpdateDialog() {
     showDialog(
       context: context,
-      barrierDismissible: false,
+      barrierDismissible: false, 
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text("🚀 Yeni Sürüm Hazır!"),
@@ -136,8 +280,6 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple, foregroundColor: Colors.white),
             onPressed: () async { 
-              // Şimdilik test için Google'a veya kendi sitene yönlendirebilirsin. 
-              // Uygulaman Play Store'a çıkınca buraya Play Store linki gelecek!
               final Uri url = Uri.parse('https://appdistribution.firebase.google.com/');
               if (await canLaunchUrl(url)) {
                 await launchUrl(url, mode: LaunchMode.externalApplication);
@@ -153,7 +295,7 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
   void ayarlariYap() async { await flutterTts.setLanguage("en-US"); await flutterTts.setPitch(1.0); await flutterTts.awaitSpeakCompletion(true); }
 
   Future<void> metniOku(String metin) async {
-    if (okumaYapiliyor) return;
+    if (okumaYapiliyor) return; 
     setState(() => okumaYapiliyor = true);
     try {
       if (sonOkunanMetin != metin) { sonOkunanMetin = metin; siradakiOkumaYavas = false; }
@@ -186,9 +328,7 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
                 alignment: WrapAlignment.center, spacing: 8, runSpacing: 8,
                 children: liste.map((String item) {
                   Color chipColor = Colors.grey[300]!;
-                  if (renkler != null && renkler.containsKey(item)) {
-                    chipColor = renkler[item]!;
-                  } else if (seciliDeger == item) chipColor = Colors.deepPurple; 
+                  if (renkler != null && renkler.containsKey(item)) { chipColor = renkler[item]!; } else if (seciliDeger == item) chipColor = Colors.deepPurple; 
                   String label = item; if (baslik.contains("Type") && turEtiketleri.containsKey(item)) label = turEtiketleri[item]!.split(" ")[0]; 
                   return ChoiceChip(
                     label: Text(label), labelStyle: TextStyle(color: seciliDeger == item ? Colors.white : Colors.black87, fontWeight: FontWeight.bold, fontSize: 12),
@@ -222,9 +362,7 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
           padding: EdgeInsets.zero,
           children: [
             DrawerHeader(decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF6A11CB), Color(0xFF2575FC)])), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [const Icon(Icons.menu_book_rounded, size: 60, color: Colors.white), const SizedBox(height: 10), Text("English Master", style: GoogleFonts.poppins(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold))])),
-            ListTile(leading: const Icon(Icons.quiz_rounded, color: Colors.orangeAccent, size: 28), title: Text("Vocabulary Test", style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600)), onTap: () { Navigator.pop(context); if (tumKelimeler.isNotEmpty) { Navigator.push(context, MaterialPageRoute(builder: (context) => TestEkrani(tumKelimeler: tumKelimeler))); } else { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Lütfen kelimelerin yüklenmesini bekleyin!"))); } }),
-            ListTile(leading: const Icon(Icons.play_circle_fill_rounded, color: Colors.pinkAccent, size: 28), title: Text("Reels Mode", style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600)), onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const FilmKesitleriEkrani())); }),
-            ListTile(leading: const Icon(Icons.favorite_rounded, color: Colors.redAccent, size: 28), title: Text("Favorite Videos", style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600)), onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const FavorilerEkrani())); }),
+            ListTile(leading: const Icon(Icons.quiz_rounded, color: Colors.orangeAccent, size: 28), title: Text("Vocabulary Test", style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600)), onTap: () { Navigator.pop(context); if (tumKelimeler.isNotEmpty) { Navigator.push(context, _alttanKayarakGecis(TestEkrani(tumKelimeler: tumKelimeler))); } else { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Lütfen kelimelerin yüklenmesini bekleyin!"))); } }),
             ListTile(leading: const Icon(Icons.refresh, color: Colors.blue, size: 28), title: Text("Refresh Words", style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600)), onTap: () { Navigator.pop(context); setState(() { isLoading = true; hataMesaji = ""; }); kelimeleriGetir(); }),
             Divider(thickness: 1, color: Colors.grey[300]),
             Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), child: Text("FILTERS", style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 1.2))),
@@ -234,11 +372,11 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
           ],
         ),
       ),
-      appBar: AppBar(title: Text("English Master", style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold)), centerTitle: true, backgroundColor: Colors.transparent, elevation: 0, iconTheme: const IconThemeData(color: Colors.white)),
+      appBar: AppBar(title: Text("Vocabulary List", style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold)), centerTitle: true, backgroundColor: Colors.transparent, elevation: 0, iconTheme: const IconThemeData(color: Colors.white)),
       body: Container(
         width: double.infinity, height: double.infinity, decoration: const BoxDecoration(gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: [Color(0xFF6A11CB), Color(0xFF2575FC)])),
         child: SafeArea(
-          child: isLoading ? const Center(child: CircularProgressIndicator(color: Colors.white))
+          child: isLoading ? const Center(child: CircularProgressIndicator(color: Colors.white)) 
               : hataMesaji.isNotEmpty ? Center(child: Text(hataMesaji, style: const TextStyle(color: Colors.white, fontSize: 18), textAlign: TextAlign.center))
                   : Column(
                       children: [
@@ -259,9 +397,47 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
                                               const SizedBox(height: 40),
                                               Row(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.center, children: [Flexible(child: Text(filtrelenmisKelimeler[index]["ing"], style: GoogleFonts.poppins(fontSize: 36, fontWeight: FontWeight.w700, color: Colors.black87), textAlign: TextAlign.center)), const SizedBox(width: 10), IconButton(icon: Icon(Icons.volume_up_rounded, size: 36, color: okumaYapiliyor ? Colors.grey : Colors.deepPurple), onPressed: () => metniOku(filtrelenmisKelimeler[index]["ing"]))]),
                                               const SizedBox(height: 40),
-                                              if (anlamigoster) ...[
-                                                Container(padding: const EdgeInsets.all(15), decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(15)), child: Column(children: [Text(filtrelenmisKelimeler[index]["tr"], style: TextStyle(fontSize: 24, color: Colors.green[700], fontWeight: FontWeight.w600), textAlign: TextAlign.center), const SizedBox(height: 15), Row(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.center, children: [Flexible(child: Text("\"${filtrelenmisKelimeler[index]["sentence"]}\"", textAlign: TextAlign.center, style: GoogleFonts.lora(fontSize: 18, fontStyle: FontStyle.italic, color: Colors.grey[700]))), const SizedBox(width: 8), IconButton(icon: Icon(Icons.volume_up_rounded, size: 24, color: Colors.deepPurple[300]), onPressed: () => metniOku(filtrelenmisKelimeler[index]["sentence"]))])])),
-                                              ] else ...[ Padding(padding: const EdgeInsets.all(20.0), child: Text("Tap to reveal", style: TextStyle(color: Colors.grey[400], fontSize: 12))) ],
+                                              
+                                              GestureDetector(
+                                                onTap: () { setState(() { anlamigoster = !anlamigoster; }); }, 
+                                                child: AnimatedCrossFade(
+                                                  firstChild: Container(
+                                                    width: double.infinity,
+                                                    padding: const EdgeInsets.symmetric(vertical: 30),
+                                                    decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(15), border: Border.all(color: Colors.grey[200]!)),
+                                                    child: Column(
+                                                      children: [
+                                                        Icon(Icons.touch_app_rounded, color: Colors.grey[300], size: 40),
+                                                        const SizedBox(height: 10),
+                                                        Text("Tap to reveal meaning", style: TextStyle(color: Colors.grey[400], fontSize: 14, fontWeight: FontWeight.w500)),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                  secondChild: Container(
+                                                    width: double.infinity,
+                                                    padding: const EdgeInsets.all(20),
+                                                    decoration: BoxDecoration(color: Colors.green[50], borderRadius: BorderRadius.circular(15), border: Border.all(color: Colors.green[200]!)),
+                                                    child: Column(
+                                                      children: [
+                                                        Text(filtrelenmisKelimeler[index]["tr"], style: TextStyle(fontSize: 24, color: Colors.green[800], fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+                                                        const SizedBox(height: 15),
+                                                        Row(
+                                                          mainAxisAlignment: MainAxisAlignment.center,
+                                                          crossAxisAlignment: CrossAxisAlignment.center,
+                                                          children: [
+                                                            Flexible(child: Text("\"${filtrelenmisKelimeler[index]["sentence"]}\"", textAlign: TextAlign.center, style: GoogleFonts.lora(fontSize: 18, fontStyle: FontStyle.italic, color: Colors.grey[800]))),
+                                                            const SizedBox(width: 8),
+                                                            IconButton(icon: Icon(Icons.volume_up_rounded, size: 28, color: Colors.deepPurple[400]), onPressed: () => metniOku(filtrelenmisKelimeler[index]["sentence"]))
+                                                          ]
+                                                        )
+                                                      ]
+                                                    )
+                                                  ),
+                                                  crossFadeState: anlamigoster ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+                                                  duration: const Duration(milliseconds: 400), 
+                                                  sizeCurve: Curves.easeOutBack, 
+                                                ),
+                                              ),
                                             ],
                                           ),
                                         ),
@@ -290,7 +466,7 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
 }
 
 // ==========================================
-// TEST / QUIZ EKRANI
+// TEST / QUIZ EKRANI (Vocabulary Test)
 // ==========================================
 class TestEkrani extends StatefulWidget {
   final List<dynamic> tumKelimeler;
@@ -340,14 +516,9 @@ class _TestEkraniState extends State<TestEkrani> {
 // ==========================================
 // FAVORİ VİDEOLAR EKRANI
 // ==========================================
-class FavorilerEkrani extends StatefulWidget {
+class FavorilerEkrani extends StatelessWidget {
   const FavorilerEkrani({super.key});
 
-  @override
-  _FavorilerEkraniState createState() => _FavorilerEkraniState();
-}
-
-class _FavorilerEkraniState extends State<FavorilerEkrani> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -355,7 +526,7 @@ class _FavorilerEkraniState extends State<FavorilerEkrani> {
       body: Container(
         width: double.infinity, height: double.infinity, decoration: BoxDecoration(color: Colors.grey[100]),
         child: globalFavoriSahneler.isEmpty 
-          ? Center(child: Padding(padding: const EdgeInsets.all(30.0), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.heart_broken_rounded, size: 80, color: Colors.grey[400]), const SizedBox(height: 20), Text("No favorites yet.", style: GoogleFonts.poppins(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.grey[600])), const SizedBox(height: 10), Text("Watch videos and tap the heart icon to save them here!", textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.grey[500]))])))
+          ? Center(child: Padding(padding: const EdgeInsets.all(30.0), child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.heart_broken_rounded, size: 80, color: Colors.grey[400]), const SizedBox(height: 20), Text("No favorites yet.", style: GoogleFonts.poppins(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.grey[600])), const SizedBox(height: 10), Text("Watch videos and tap the heart icon to save them here!", textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.grey[500]))]))) 
           : ListView.builder(
               padding: const EdgeInsets.symmetric(vertical: 10), itemCount: globalFavoriSahneler.length,
               itemBuilder: (context, index) {
@@ -365,8 +536,11 @@ class _FavorilerEkraniState extends State<FavorilerEkrani> {
                   child: ListTile(
                     contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10), leading: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.pinkAccent.withOpacity(0.2), shape: BoxShape.circle), child: const Icon(Icons.movie_creation_rounded, color: Colors.pinkAccent)),
                     title: Text(sahne["kaynak"] ?? "Reels Video ${index + 1}", style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16)), 
-                    trailing: IconButton(icon:  Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 28), onPressed: () { setState(() { globalFavoriSahneler.removeAt(index); }); }),
-                    onTap: () { Navigator.push(context, MaterialPageRoute(builder: (context) => FilmKesitleriEkrani(ozelListe: globalFavoriSahneler, baslangicIndex: index))).then((_) => setState(() {})); },
+                    trailing: IconButton(icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 28), onPressed: () { 
+                      globalFavoriSahneler.removeAt(index);
+                      Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (context, animation1, animation2) => const FavorilerEkrani(), transitionDuration: Duration.zero));
+                    }),
+                    onTap: () { Navigator.push(context, MaterialPageRoute(builder: (context) => FilmKesitleriEkrani(ozelListe: globalFavoriSahneler, baslangicIndex: index))); },
                   ),
                 );
               }
@@ -469,12 +643,9 @@ class _FilmKesitleriEkraniState extends State<FilmKesitleriEkrani> {
   }
 }
 
-// ==========================================
-// TEK BİR REELS VİDEO OYNATICISI
-// ==========================================
 class ReelsVideoOgesi extends StatefulWidget {
   final dynamic sahne;
-  final bool isFocused;
+  final bool isFocused; 
   final bool isFavori;
   final VoidCallback onFavoriToggle;
 
@@ -496,8 +667,8 @@ class _ReelsVideoOgesiState extends State<ReelsVideoOgesi> {
       ..initialize().then((_) {
         setState(() { _isPlayerReady = true; });
         _controller!.setVolume(1.0); 
-        _controller!.setLooping(true);
-        if (widget.isFocused) { _controller!.play(); }
+        _controller!.setLooping(true); 
+        if (widget.isFocused) { _controller!.play(); } 
       });
   }
 
@@ -532,7 +703,7 @@ class _ReelsVideoOgesiState extends State<ReelsVideoOgesi> {
       children: [
         _isPlayerReady
             ? GestureDetector(
-                onTap: () { setState(() { if (_controller!.value.isPlaying) { _controller!.pause(); } else { _controller!.play(); } }); },
+                onTap: () { setState(() { if (_controller!.value.isPlaying) { _controller!.pause(); } else { _controller!.play(); } }); }, 
                 child: SizedBox.expand(
                   child: FittedBox(
                     fit: BoxFit.contain, 
@@ -567,6 +738,213 @@ class _ReelsVideoOgesiState extends State<ReelsVideoOgesi> {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ==========================================
+// YAPAY ZEKA DESTEKLİ KONUŞMA PRATİĞİ EKRANI
+// ==========================================
+class KonusmaPratigiEkrani extends StatefulWidget {
+  const KonusmaPratigiEkrani({super.key});
+
+  @override
+  _KonusmaPratigiEkraniState createState() => _KonusmaPratigiEkraniState();
+}
+
+class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
+  late stt.SpeechToText _speechToText;
+  late FlutterTts _flutterTts;
+  bool _isListening = false;
+  String _kullaniciMetni = "";
+  
+  final List<Map<String, String>> _mesajlar = [];
+  bool _aiDusunuyor = false;
+
+  // GOOGLE GEMINI API ŞİFREN BURAYA EKLENDİ!
+  final String apiKey = "AIzaSyBJH9mdLFIuf4b7BbaoBkSsSTNxULnxuoA"; 
+  late GenerativeModel _model;
+  late ChatSession _chat;
+
+  @override
+  void initState() {
+    super.initState();
+    _speechToText = stt.SpeechToText();
+    _flutterTts = FlutterTts();
+    _sesAyarlariniYap();
+    _yapayZekayiBaslat();
+  }
+
+  void _sesAyarlariniYap() async {
+    await _flutterTts.setLanguage("en-US");
+    await _flutterTts.setPitch(1.1); 
+    await _flutterTts.setSpeechRate(0.45); 
+  }
+
+  void _yapayZekayiBaslat() {
+    _model = GenerativeModel(
+      model: 'gemini-1.5-flash',
+      apiKey: apiKey,
+      systemInstruction: Content.system("Sen arkadaş canlısı ve cesaretlendirici bir İngilizce öğretmenisin. Karşındaki kişi A2 seviyesinde İngilizce pratik yapmak istiyor. Onunla sadece İngilizce konuş. Yanıtların çok kısa, günlük hayattan ve anlaşılır olsun (en fazla 2-3 cümle). Eğer İngilizce gramer hatası yaparsa, çok nazikçe doğrusunu söyleyip sohbete devam et."),
+    );
+    _chat = _model.startChat();
+    
+    _mesajEkle("AI", "Hello! I am your English teacher. How are you doing today?");
+    _sesliOku("Hello! I am your English teacher. How are you doing today?");
+  }
+
+  void _mesajEkle(String gonderen, String metin) {
+    setState(() {
+      _mesajlar.add({"gonderen": gonderen, "metin": metin});
+    });
+  }
+
+  void _dinlemeyiBaslat() async {
+    bool available = await _speechToText.initialize(
+      onStatus: (status) => print('Durum: $status'),
+      onError: (errorNotification) => print('Hata: $errorNotification'),
+    );
+
+    if (available) {
+      setState(() => _isListening = true);
+      _speechToText.listen(
+        onResult: (result) {
+          setState(() {
+            _kullaniciMetni = result.recognizedWords;
+          });
+          if (result.finalResult) {
+            _isListening = false;
+            _yapayZekayaGonder(_kullaniciMetni);
+          }
+        },
+        localeId: "en_US", 
+      );
+    }
+  }
+
+  void _dinlemeyiDurdur() {
+    _speechToText.stop();
+    setState(() => _isListening = false);
+  }
+
+  Future<void> _yapayZekayaGonder(String mesaj) async {
+    if (mesaj.trim().isEmpty) return;
+    
+    _mesajEkle("Sen", mesaj);
+    setState(() {
+      _kullaniciMetni = "";
+      _aiDusunuyor = true;
+    });
+
+    try {
+      final response = await _chat.sendMessage(Content.text(mesaj));
+      final aiCevabi = response.text ?? "I didn't understand that.";
+      
+      _mesajEkle("AI", aiCevabi);
+      _sesliOku(aiCevabi);
+    } catch (e) {
+      _mesajEkle("AI", "Oops! Connection error. Let's try again.");
+    } finally {
+      setState(() => _aiDusunuyor = false);
+    }
+  }
+
+  Future<void> _sesliOku(String metin) async {
+    await _flutterTts.speak(metin);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF1E1E2C), 
+      appBar: AppBar(
+        title: Text("Speaking Practice", style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(20),
+              itemCount: _mesajlar.length,
+              itemBuilder: (context, index) {
+                final mesaj = _mesajlar[index];
+                final isSen = mesaj["gonderen"] == "Sen";
+                
+                return Align(
+                  alignment: isSen ? Alignment.centerRight : Alignment.centerLeft,
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 15),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+                    decoration: BoxDecoration(
+                      color: isSen ? Colors.deepPurpleAccent : Colors.white.withOpacity(0.1),
+                      borderRadius: BorderRadius.only(
+                        topLeft: const Radius.circular(20),
+                        topRight: const Radius.circular(20),
+                        bottomLeft: isSen ? const Radius.circular(20) : const Radius.circular(0),
+                        bottomRight: isSen ? const Radius.circular(0) : const Radius.circular(20),
+                      ),
+                    ),
+                    child: Text(
+                      mesaj["metin"]!,
+                      style: GoogleFonts.poppins(color: Colors.white, fontSize: 16),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          
+          if (_aiDusunuyor) 
+            const Padding(
+              padding: EdgeInsets.all(8.0),
+              child: CircularProgressIndicator(color: Colors.deepPurpleAccent),
+            ),
+
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 30, horizontal: 20),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.3),
+              borderRadius: const BorderRadius.only(topLeft: Radius.circular(30), topRight: Radius.circular(30)),
+            ),
+            child: Column(
+              children: [
+                Text(
+                  _isListening ? "Listening... (Speak in English)" : "Tap the mic and speak!",
+                  style: GoogleFonts.poppins(color: _isListening ? Colors.greenAccent : Colors.grey[400], fontSize: 16),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  _kullaniciMetni,
+                  style: GoogleFonts.poppins(color: Colors.white70, fontStyle: FontStyle.italic),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 20),
+                GestureDetector(
+                  onTapDown: (_) => _dinlemeyiBaslat(),
+                  onTapUp: (_) => _dinlemeyiDurdur(),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 300),
+                    padding: EdgeInsets.all(_isListening ? 30 : 20),
+                    decoration: BoxDecoration(
+                      color: _isListening ? Colors.greenAccent.withOpacity(0.8) : Colors.deepPurpleAccent,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        if (_isListening) BoxShadow(color: Colors.greenAccent.withOpacity(0.6), blurRadius: 20, spreadRadius: 10)
+                      ]
+                    ),
+                    child: Icon(Icons.mic_rounded, color: Colors.white, size: _isListening ? 50 : 40),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text("Hold to speak", style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+              ],
+            ),
+          )
+        ],
+      ),
     );
   }
 }
