@@ -7,29 +7,79 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:video_player/video_player.dart'; 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
-import 'package:url_launcher/url_launcher.dart'; 
+import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // --- YENİ EKLENEN YAPAY ZEKA VE SES PAKETLERİ ---
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:google_generative_ai/google_generative_ai.dart';
 
 // ==========================================
-// GLOBAL HAFIZA
+// DERLEME ZAMANI AYARLARI
 // ==========================================
+// API anahtarı ASLA koda yazılmaz. Derlerken şu şekilde verilir:
+//   flutter run --dart-define=GEMINI_API_KEY=xxxx
+const String geminiApiKey = String.fromEnvironment('GEMINI_API_KEY');
+const String geminiModel = String.fromEnvironment('GEMINI_MODEL', defaultValue: 'gemini-3.8-flash');
+
+// pubspec.yaml içindeki "version" ile aynı tutulmalı (güncelleme kontrolü bunu kullanır).
+const String uygulamaSurumu = "1.0.0";
+
+// ==========================================
+// GLOBAL HAFIZA (cihazda kalıcı olarak saklanır)
+// ==========================================
+const String _favoriAnahtari = "favori_sahneler";
 List<Map<String, dynamic>> globalFavoriSahneler = [];
+
+Future<void> favorileriYukle() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final kayit = prefs.getString(_favoriAnahtari);
+    if (kayit == null) return;
+    globalFavoriSahneler = (json.decode(kayit) as List)
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+  } catch (e) {
+    debugPrint("Favoriler yüklenemedi: $e");
+  }
+}
+
+Future<void> favorileriKaydet() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_favoriAnahtari, json.encode(globalFavoriSahneler));
+  } catch (e) {
+    debugPrint("Favoriler kaydedilemedi: $e");
+  }
+}
+
+/// Sunucudan gelen JSON listesini her zaman UTF-8 olarak çözer (Türkçe karakterler bozulmasın).
+List<dynamic> _jsonListeCoz(http.Response response) {
+  final veri = json.decode(utf8.decode(response.bodyBytes));
+  return veri is List ? veri : <dynamic>[];
+}
+
+/// Tablodaki bir hücreyi güvenli şekilde metne çevirir (boş/eksik hücre çökme yapmaz).
+String _alan(dynamic satir, String anahtar) {
+  if (satir is! Map) return "";
+  return (satir[anahtar] ?? "").toString().trim();
+}
 
 // ==========================================
 // ANA GİRİŞ NOKTASI
 // ==========================================
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   try {
-    await Firebase.initializeApp(); 
+    await Firebase.initializeApp();
   } catch (e) {
-    print("Firebase Başlatılamadı: $e");
+    debugPrint("Firebase Başlatılamadı: $e");
   }
-  
+
+  await favorileriYukle();
+
   runApp(const IngilizceUygulamam());
 }
 
@@ -95,7 +145,7 @@ class AnaMenuEkrani extends StatelessWidget {
                   children: [
                     Container(
                       padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), shape: BoxShape.circle),
+                      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.1), shape: BoxShape.circle),
                       child: const Icon(Icons.language_rounded, color: Colors.white, size: 40),
                     ),
                     const SizedBox(width: 15),
@@ -160,16 +210,16 @@ class AnaMenuEkrani extends StatelessWidget {
       onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.08),
+          color: Colors.white.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(25),
-          border: Border.all(color: Colors.white.withOpacity(0.1)),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
               padding: const EdgeInsets.all(15),
-              decoration: BoxDecoration(color: renk.withOpacity(0.2), shape: BoxShape.circle),
+              decoration: BoxDecoration(color: renk.withValues(alpha: 0.2), shape: BoxShape.circle),
               child: Icon(ikon, size: 40, color: renk),
             ),
             const SizedBox(height: 15),
@@ -188,7 +238,7 @@ class SeviyeliKelimeEkrani extends StatefulWidget {
   const SeviyeliKelimeEkrani({super.key});
 
   @override
-  _SeviyeliKelimeEkraniState createState() => _SeviyeliKelimeEkraniState();
+  State<SeviyeliKelimeEkrani> createState() => _SeviyeliKelimeEkraniState();
 }
 
 class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
@@ -256,14 +306,13 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
       ));
       await remoteConfig.fetchAndActivate();
       
-      String newVersion = remoteConfig.getString('current_version');
-      String currentVersion = "1.0.0"; 
+      String newVersion = remoteConfig.getString('current_version').trim();
 
-      if (newVersion != currentVersion && newVersion.isNotEmpty) {
-        _showUpdateDialog(); 
+      if (mounted && newVersion.isNotEmpty && newVersion != uygulamaSurumu) {
+        _showUpdateDialog();
       }
     } catch (e) {
-      print("Güncelleme Hatası: $e");
+      debugPrint("Güncelleme Hatası: $e");
     }
   }
 
@@ -292,26 +341,39 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
     );
   }
 
-  void ayarlariYap() async { await flutterTts.setLanguage("en-US"); await flutterTts.setPitch(1.0); await flutterTts.awaitSpeakCompletion(true); }
+  Future<void> ayarlariYap() async {
+    try { await flutterTts.setLanguage("en-US"); await flutterTts.setPitch(1.0); await flutterTts.awaitSpeakCompletion(true); }
+    catch (e) { debugPrint("TTS ayar hatası: $e"); }
+  }
+
+  @override
+  void dispose() {
+    flutterTts.stop();
+    super.dispose();
+  }
 
   Future<void> metniOku(String metin) async {
-    if (okumaYapiliyor) return; 
+    if (okumaYapiliyor || metin.isEmpty) return;
     setState(() => okumaYapiliyor = true);
     try {
       if (sonOkunanMetin != metin) { sonOkunanMetin = metin; siradakiOkumaYavas = false; }
-      if (siradakiOkumaYavas) { await flutterTts.setSpeechRate(0.2); await flutterTts.speak(metin); siradakiOkumaYavas = false; } 
+      if (siradakiOkumaYavas) { await flutterTts.setSpeechRate(0.2); await flutterTts.speak(metin); siradakiOkumaYavas = false; }
       else { await flutterTts.setSpeechRate(0.5); await flutterTts.speak(metin); siradakiOkumaYavas = true; }
-    } catch (e) { print("Error: $e"); }
-    setState(() => okumaYapiliyor = false);
+    } catch (e) { debugPrint("Error: $e"); }
+    if (mounted) setState(() => okumaYapiliyor = false);
   }
 
   Future<void> kelimeleriGetir() async {
     final url = Uri.parse('https://opensheet.elk.sh/1hXXqO86XDXyelpIEuRSvyWr6OZafBaTV97_LG3YsjqY/WORD');
     try {
-      final response = await http.get(url);
-      if (response.statusCode == 200) { setState(() { tumKelimeler = json.decode(response.body); isLoading = false; }); } 
+      final response = await http.get(url).timeout(const Duration(seconds: 20));
+      if (!mounted) return;
+      if (response.statusCode == 200) { final liste = _jsonListeCoz(response); setState(() { tumKelimeler = liste; index = 0; anlamigoster = false; isLoading = false; }); }
       else { setState(() { hataMesaji = "Server Error: ${response.statusCode}"; isLoading = false; }); }
-    } catch (e) { setState(() { hataMesaji = "Connection Error: $e"; isLoading = false; }); }
+    } catch (e) {
+      debugPrint("Kelime listesi hatası: $e");
+      if (mounted) setState(() { hataMesaji = "Connection Error.\nPlease check your internet and tap Refresh Words."; isLoading = false; });
+    }
   }
 
   void _pencereAc({required String baslik, required List<String> liste, required String seciliDeger, required Function(String) onSecim, Map<String, Color>? renkler}) {
@@ -319,7 +381,7 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          backgroundColor: Colors.white.withOpacity(0.95), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          backgroundColor: Colors.white.withValues(alpha: 0.95), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: Text(baslik, style: GoogleFonts.poppins(fontWeight: FontWeight.bold, color: Colors.deepPurple), textAlign: TextAlign.center),
           content: SizedBox(
             width: double.maxFinite,
@@ -328,11 +390,11 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
                 alignment: WrapAlignment.center, spacing: 8, runSpacing: 8,
                 children: liste.map((String item) {
                   Color chipColor = Colors.grey[300]!;
-                  if (renkler != null && renkler.containsKey(item)) { chipColor = renkler[item]!; } else if (seciliDeger == item) chipColor = Colors.deepPurple; 
+                  if (renkler != null && renkler.containsKey(item)) { chipColor = renkler[item]!; } else if (seciliDeger == item) { chipColor = Colors.deepPurple; }
                   String label = item; if (baslik.contains("Type") && turEtiketleri.containsKey(item)) label = turEtiketleri[item]!.split(" ")[0]; 
                   return ChoiceChip(
                     label: Text(label), labelStyle: TextStyle(color: seciliDeger == item ? Colors.white : Colors.black87, fontWeight: FontWeight.bold, fontSize: 12),
-                    selected: seciliDeger == item, selectedColor: chipColor, backgroundColor: Colors.white, side: BorderSide(color: chipColor.withOpacity(0.5)),
+                    selected: seciliDeger == item, selectedColor: chipColor, backgroundColor: Colors.white, side: BorderSide(color: chipColor.withValues(alpha: 0.5)),
                     onSelected: (bool selected) { onSecim(item); Navigator.of(context).pop(); }, padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                   );
                 }).toList(),
@@ -348,11 +410,19 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
   @override
   Widget build(BuildContext context) {
     List<dynamic> filtrelenmisKelimeler = tumKelimeler.where((k) {
-      String gelenSeviye = k["lvl"].toString().trim(); bool seviyeUyuyor = gelenSeviye == seciliSeviye;
-      String kelime = k["ing"].toString().trim(); bool harfUyuyor = seciliHarf == "All" || kelime.toUpperCase().startsWith(seciliHarf);
-      String gelenTur = k["type"].toString().toLowerCase().trim(); bool turUyuyor = seciliTur == "All" ? true : (gelenTur == seciliTur || gelenTur.startsWith(seciliTur));
-      return seviyeUyuyor && turUyuyor && harfUyuyor;
+      String gelenSeviye = _alan(k, "lvl").toUpperCase(); bool seviyeUyuyor = gelenSeviye == seciliSeviye;
+      String kelime = _alan(k, "ing"); bool harfUyuyor = seciliHarf == "All" || kelime.toUpperCase().startsWith(seciliHarf);
+      String gelenTur = _alan(k, "type").toLowerCase(); bool turUyuyor = seciliTur == "All" ? true : (gelenTur == seciliTur || gelenTur.startsWith(seciliTur));
+      return kelime.isNotEmpty && seviyeUyuyor && turUyuyor && harfUyuyor;
     }).toList();
+
+    // Liste yenilenince/filtre değişince index liste dışına taşmasın.
+    if (index >= filtrelenmisKelimeler.length) index = 0;
+    final dynamic aktifKelime = filtrelenmisKelimeler.isEmpty ? null : filtrelenmisKelimeler[index];
+    final String aktifIng = _alan(aktifKelime, "ing");
+    final String aktifTr = _alan(aktifKelime, "tr");
+    final String aktifCumle = _alan(aktifKelime, "sentence");
+    final String aktifTur = _alan(aktifKelime, "type").toLowerCase();
 
     return Scaffold(
       extendBodyBehindAppBar: true,
@@ -393,9 +463,9 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
                                           child: Column(
                                             mainAxisAlignment: MainAxisAlignment.center,
                                             children: [
-                                              Align(alignment: Alignment.topRight, child: Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), decoration: BoxDecoration(color: (turRenkleri[filtrelenmisKelimeler[index]["type"]] ?? Colors.grey).withOpacity(0.1), borderRadius: BorderRadius.circular(20), border: Border.all(color: (turRenkleri[filtrelenmisKelimeler[index]["type"]] ?? Colors.grey))), child: Text(turEtiketleri[filtrelenmisKelimeler[index]["type"]]?.split("(")[0] ?? filtrelenmisKelimeler[index]["type"] ?? "?", style: TextStyle(color: turRenkleri[filtrelenmisKelimeler[index]["type"]] ?? Colors.black, fontWeight: FontWeight.bold, fontSize: 12)))),
+                                              Align(alignment: Alignment.topRight, child: Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), decoration: BoxDecoration(color: (turRenkleri[aktifTur] ?? Colors.grey).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20), border: Border.all(color: (turRenkleri[aktifTur] ?? Colors.grey))), child: Text(turEtiketleri[aktifTur]?.split("(")[0] ?? (aktifTur.isEmpty ? "?" : aktifTur), style: TextStyle(color: turRenkleri[aktifTur] ?? Colors.black, fontWeight: FontWeight.bold, fontSize: 12)))),
                                               const SizedBox(height: 40),
-                                              Row(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.center, children: [Flexible(child: Text(filtrelenmisKelimeler[index]["ing"], style: GoogleFonts.poppins(fontSize: 36, fontWeight: FontWeight.w700, color: Colors.black87), textAlign: TextAlign.center)), const SizedBox(width: 10), IconButton(icon: Icon(Icons.volume_up_rounded, size: 36, color: okumaYapiliyor ? Colors.grey : Colors.deepPurple), onPressed: () => metniOku(filtrelenmisKelimeler[index]["ing"]))]),
+                                              Row(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.center, children: [Flexible(child: Text(aktifIng, style: GoogleFonts.poppins(fontSize: 36, fontWeight: FontWeight.w700, color: Colors.black87), textAlign: TextAlign.center)), const SizedBox(width: 10), IconButton(icon: Icon(Icons.volume_up_rounded, size: 36, color: okumaYapiliyor ? Colors.grey : Colors.deepPurple), onPressed: () => metniOku(aktifIng))]),
                                               const SizedBox(height: 40),
                                               
                                               GestureDetector(
@@ -419,15 +489,15 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
                                                     decoration: BoxDecoration(color: Colors.green[50], borderRadius: BorderRadius.circular(15), border: Border.all(color: Colors.green[200]!)),
                                                     child: Column(
                                                       children: [
-                                                        Text(filtrelenmisKelimeler[index]["tr"], style: TextStyle(fontSize: 24, color: Colors.green[800], fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+                                                        Text(aktifTr, style: TextStyle(fontSize: 24, color: Colors.green[800], fontWeight: FontWeight.bold), textAlign: TextAlign.center),
                                                         const SizedBox(height: 15),
                                                         Row(
                                                           mainAxisAlignment: MainAxisAlignment.center,
                                                           crossAxisAlignment: CrossAxisAlignment.center,
                                                           children: [
-                                                            Flexible(child: Text("\"${filtrelenmisKelimeler[index]["sentence"]}\"", textAlign: TextAlign.center, style: GoogleFonts.lora(fontSize: 18, fontStyle: FontStyle.italic, color: Colors.grey[800]))),
+                                                            Flexible(child: Text("\"$aktifCumle\"", textAlign: TextAlign.center, style: GoogleFonts.lora(fontSize: 18, fontStyle: FontStyle.italic, color: Colors.grey[800]))),
                                                             const SizedBox(width: 8),
-                                                            IconButton(icon: Icon(Icons.volume_up_rounded, size: 28, color: Colors.deepPurple[400]), onPressed: () => metniOku(filtrelenmisKelimeler[index]["sentence"]))
+                                                            IconButton(icon: Icon(Icons.volume_up_rounded, size: 28, color: Colors.deepPurple[400]), onPressed: () => metniOku(aktifCumle))
                                                           ]
                                                         )
                                                       ]
@@ -472,7 +542,7 @@ class TestEkrani extends StatefulWidget {
   final List<dynamic> tumKelimeler;
   const TestEkrani({super.key, required this.tumKelimeler});
   @override
-  _TestEkraniState createState() => _TestEkraniState();
+  State<TestEkrani> createState() => _TestEkraniState();
 }
 
 class _TestEkraniState extends State<TestEkrani> {
@@ -480,24 +550,32 @@ class _TestEkraniState extends State<TestEkrani> {
   String seciliSeviye = "A1"; bool testDevamEdiyor = false; List<dynamic> testKelimeleri = [];
   int soruIndex = 0; int puan = 0; dynamic dogruKelime; List<String> secenekler = []; bool cevapSecildi = false; String secilenCevap = "";
 
+  int get toplamSoru => min(10, testKelimeleri.length);
+  String get dogruCevap => _alan(dogruKelime, "tr");
+
   void testiBaslat() {
-    testKelimeleri = widget.tumKelimeler.where((k) => k["lvl"].toString().trim() == seciliSeviye).toList();
+    testKelimeleri = widget.tumKelimeler.where((k) => _alan(k, "lvl").toUpperCase() == seciliSeviye && _alan(k, "ing").isNotEmpty && _alan(k, "tr").isNotEmpty).toList();
     if (testKelimeleri.length < 4) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Bu seviyede yeterli kelime yok!"))); return; }
     testKelimeleri.shuffle(); setState(() { testDevamEdiyor = true; soruIndex = 0; puan = 0; }); yeniSoruHazirla();
   }
 
+  void testiBitir() {
+    showDialog(context: context, barrierDismissible: false, builder: (ctx) => AlertDialog(title: const Text("Test Finished! 🎉", textAlign: TextAlign.center), content: Text("Your Score: $puan / $toplamSoru", style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold), textAlign: TextAlign.center), actions: [ TextButton(child: const Text("Close"), onPressed: () { Navigator.of(ctx).pop(); if (mounted) setState(() => testDevamEdiyor = false); }) ]));
+  }
+
   void yeniSoruHazirla() {
-    if (soruIndex >= 10 || soruIndex >= testKelimeleri.length) {
-      showDialog(context: context, barrierDismissible: false, builder: (ctx) => AlertDialog(title: const Text("Test Finished! 🎉", textAlign: TextAlign.center), content: Text("Your Score: $puan / ${min(10, testKelimeleri.length)}", style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold), textAlign: TextAlign.center), actions: [ TextButton(child: const Text("Close"), onPressed: () { Navigator.of(ctx).pop(); setState(() => testDevamEdiyor = false); }) ])); return;
-    }
     cevapSecildi = false; secilenCevap = ""; dogruKelime = testKelimeleri[soruIndex];
-    List<String> havuz = widget.tumKelimeler.where((k) => k["tr"] != dogruKelime["tr"]).map((k) => k["tr"].toString()).toSet().toList();
-    havuz.shuffle(); secenekler = [dogruKelime["tr"]]; secenekler.addAll(havuz.take(3)); secenekler.shuffle(); setState(() {});
+    List<String> havuz = widget.tumKelimeler.map((k) => _alan(k, "tr")).where((tr) => tr.isNotEmpty && tr != dogruCevap).toSet().toList();
+    havuz.shuffle(); secenekler = [dogruCevap, ...havuz.take(3)]; secenekler.shuffle(); setState(() {});
   }
 
   void cevapKontrol(String cevap) {
-    if (cevapSecildi) return; setState(() { cevapSecildi = true; secilenCevap = cevap; if (cevap == dogruKelime["tr"]) puan++; });
-    Future.delayed(const Duration(milliseconds: 1500), () { if (mounted) { setState(() { soruIndex++; }); yeniSoruHazirla(); } });
+    if (cevapSecildi) return; setState(() { cevapSecildi = true; secilenCevap = cevap; if (cevap == dogruCevap) puan++; });
+    Future.delayed(const Duration(milliseconds: 1500), () {
+      if (!mounted) return;
+      // Son sorudan sonra "Question 11 / 10" görünmesin: önce bitiş kontrolü.
+      if (soruIndex + 1 >= toplamSoru) { testiBitir(); } else { soruIndex++; yeniSoruHazirla(); }
+    });
   }
 
   @override
@@ -510,15 +588,20 @@ class _TestEkraniState extends State<TestEkrani> {
   }
 
   Widget _testGirisEkrani() { return Center(child: Padding(padding: const EdgeInsets.all(20.0), child: Card(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), child: Padding(padding: const EdgeInsets.all(30.0), child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.school_rounded, size: 80, color: Colors.deepPurple), const SizedBox(height: 20), Text("Select Level for Quiz", style: GoogleFonts.poppins(fontSize: 22, fontWeight: FontWeight.bold)), const SizedBox(height: 20), DropdownButton<String>(value: seciliSeviye, isExpanded: true, items: seviyeListesi.map((String value) { return DropdownMenuItem<String>(value: value, child: Center(child: Text("Level $value", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)))); }).toList(), onChanged: (yeniDeger) { setState(() { seciliSeviye = yeniDeger!; }); }), const SizedBox(height: 30), SizedBox(width: double.infinity, height: 50, child: ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.orangeAccent, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))), onPressed: testiBaslat, child: const Text("START TEST", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 1.5))))]))))); }
-  Widget _soruEkrani() { return Padding(padding: const EdgeInsets.all(20.0), child: Column(children: [Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text("Question: ${soruIndex + 1} / ${min(10, testKelimeleri.length)}", style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)), Container(padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8), decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(20)), child: Text("Score: $puan", style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)))]), const SizedBox(height: 40), Card(elevation: 10, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), child: Container(width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 20), child: Column(children: [Text("What does this mean?", style: TextStyle(color: Colors.grey[600], fontSize: 16)), const SizedBox(height: 10), Text(dogruKelime["ing"], style: GoogleFonts.poppins(fontSize: 40, fontWeight: FontWeight.bold, color: Colors.deepPurple), textAlign: TextAlign.center)]))), const SizedBox(height: 40), Expanded(child: ListView.builder(itemCount: secenekler.length, itemBuilder: (context, index) {String secenek = secenekler[index]; Color butonRengi = Colors.white; Color yaziRengi = Colors.black87; if (cevapSecildi) { if (secenek == dogruKelime["tr"]) { butonRengi = Colors.green; yaziRengi = Colors.white; } else if (secenek == secilenCevap) { butonRengi = Colors.red; yaziRengi = Colors.white; } else { butonRengi = Colors.grey[300]!; } } return Padding(padding: const EdgeInsets.only(bottom: 15.0), child: SizedBox(height: 60, child: ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: butonRengi, foregroundColor: yaziRengi, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)), elevation: cevapSecildi ? 0 : 5), onPressed: () => cevapKontrol(secenek), child: Text(secenek, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600), textAlign: TextAlign.center)))); }))])); }
+  Widget _soruEkrani() { return Padding(padding: const EdgeInsets.all(20.0), child: Column(children: [Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text("Question: ${soruIndex + 1} / $toplamSoru", style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)), Container(padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8), decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(20)), child: Text("Score: $puan", style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)))]), const SizedBox(height: 40), Card(elevation: 10, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), child: Container(width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 20), child: Column(children: [Text("What does this mean?", style: TextStyle(color: Colors.grey[600], fontSize: 16)), const SizedBox(height: 10), Text(_alan(dogruKelime, "ing"), style: GoogleFonts.poppins(fontSize: 40, fontWeight: FontWeight.bold, color: Colors.deepPurple), textAlign: TextAlign.center)]))), const SizedBox(height: 40), Expanded(child: ListView.builder(itemCount: secenekler.length, itemBuilder: (context, index) {String secenek = secenekler[index]; Color butonRengi = Colors.white; Color yaziRengi = Colors.black87; if (cevapSecildi) { if (secenek == dogruCevap) { butonRengi = Colors.green; yaziRengi = Colors.white; } else if (secenek == secilenCevap) { butonRengi = Colors.red; yaziRengi = Colors.white; } else { butonRengi = Colors.grey[300]!; } } return Padding(padding: const EdgeInsets.only(bottom: 15.0), child: SizedBox(height: 60, child: ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: butonRengi, foregroundColor: yaziRengi, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)), elevation: cevapSecildi ? 0 : 5), onPressed: () => cevapKontrol(secenek), child: Text(secenek, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600), textAlign: TextAlign.center)))); }))])); }
 }
 
 // ==========================================
 // FAVORİ VİDEOLAR EKRANI
 // ==========================================
-class FavorilerEkrani extends StatelessWidget {
+class FavorilerEkrani extends StatefulWidget {
   const FavorilerEkrani({super.key});
 
+  @override
+  State<FavorilerEkrani> createState() => _FavorilerEkraniState();
+}
+
+class _FavorilerEkraniState extends State<FavorilerEkrani> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -534,13 +617,17 @@ class FavorilerEkrani extends StatelessWidget {
                 return Card(
                   margin: const EdgeInsets.symmetric(horizontal: 15, vertical: 8), elevation: 3, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                   child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10), leading: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.pinkAccent.withOpacity(0.2), shape: BoxShape.circle), child: const Icon(Icons.movie_creation_rounded, color: Colors.pinkAccent)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10), leading: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.pinkAccent.withValues(alpha: 0.2), shape: BoxShape.circle), child: const Icon(Icons.movie_creation_rounded, color: Colors.pinkAccent)),
                     title: Text(sahne["kaynak"] ?? "Reels Video ${index + 1}", style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16)), 
                     trailing: IconButton(icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 28), onPressed: () { 
-                      globalFavoriSahneler.removeAt(index);
-                      Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (context, animation1, animation2) => const FavorilerEkrani(), transitionDuration: Duration.zero));
+                      setState(() => globalFavoriSahneler.removeAt(index));
+                      favorileriKaydet();
                     }),
-                    onTap: () { Navigator.push(context, MaterialPageRoute(builder: (context) => FilmKesitleriEkrani(ozelListe: globalFavoriSahneler, baslangicIndex: index))); },
+                    // Videodan dönünce liste yenilensin (izlerken favoriden çıkarılmış olabilir).
+                    onTap: () async {
+                      await Navigator.push(context, MaterialPageRoute(builder: (context) => FilmKesitleriEkrani(ozelListe: List.of(globalFavoriSahneler), baslangicIndex: index)));
+                      if (mounted) setState(() {});
+                    },
                   ),
                 );
               }
@@ -560,7 +647,7 @@ class FilmKesitleriEkrani extends StatefulWidget {
   const FilmKesitleriEkrani({super.key, this.ozelListe, this.baslangicIndex = 0});
 
   @override
-  _FilmKesitleriEkraniState createState() => _FilmKesitleriEkraniState();
+  State<FilmKesitleriEkrani> createState() => _FilmKesitleriEkraniState();
 }
 
 class _FilmKesitleriEkraniState extends State<FilmKesitleriEkrani> {
@@ -588,16 +675,19 @@ class _FilmKesitleriEkraniState extends State<FilmKesitleriEkrani> {
   Future<void> _videolariGetir() async {
     final url = Uri.parse('https://opensheet.elk.sh/1hXXqO86XDXyelpIEuRSvyWr6OZafBaTV97_LG3YsjqY/VIDEO');
     try {
-      final response = await http.get(url);
+      final response = await http.get(url).timeout(const Duration(seconds: 20));
+      if (!mounted) return;
       if (response.statusCode == 200) {
-        final List<dynamic> gelenVeri = json.decode(response.body);
-        gelenVeri.shuffle(); 
+        // Video adresi boş olan satırlar oynatıcıyı çökertmesin.
+        final List<dynamic> gelenVeri = _jsonListeCoz(response).where((s) => _alan(s, "videoUrl").isNotEmpty).toList();
+        gelenVeri.shuffle();
         setState(() { _sahneler = gelenVeri; _isLoading = false; });
       } else {
         setState(() { _hataMesaji = "Sunucu Hatası: ${response.statusCode}"; _isLoading = false; });
       }
     } catch (e) {
-      setState(() { _hataMesaji = "Bağlantı Hatası: İnternetinizi kontrol edin."; _isLoading = false; });
+      debugPrint("Video listesi hatası: $e");
+      if (mounted) setState(() { _hataMesaji = "Bağlantı Hatası: İnternetinizi kontrol edin."; _isLoading = false; });
     }
   }
 
@@ -610,8 +700,8 @@ class _FilmKesitleriEkraniState extends State<FilmKesitleriEkrani> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) return const Scaffold(backgroundColor: Colors.black, body: Center(child: CircularProgressIndicator(color: Colors.pinkAccent)));
-    if (_hataMesaji.isNotEmpty) return Scaffold(backgroundColor: Colors.black, appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0), body: Center(child: Text(_hataMesaji, style: const TextStyle(color: Colors.white))));
-    if (_sahneler.isEmpty) return  Scaffold(backgroundColor: Colors.black, appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0), body: Center(child: Text("Excel tablonda henüz video yok.", style: TextStyle(color: Colors.white))));
+    if (_hataMesaji.isNotEmpty) return Scaffold(backgroundColor: Colors.black, appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0, iconTheme: const IconThemeData(color: Colors.white)), body: Center(child: Text(_hataMesaji, style: const TextStyle(color: Colors.white))));
+    if (_hataMesaji.isEmpty && _sahneler.isEmpty) return Scaffold(backgroundColor: Colors.black, appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0, iconTheme: const IconThemeData(color: Colors.white)), body: const Center(child: Text("Excel tablonda henüz video yok.", style: TextStyle(color: Colors.white))));
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -632,9 +722,10 @@ class _FilmKesitleriEkraniState extends State<FilmKesitleriEkrani> {
             isFavori: isFavori,
             onFavoriToggle: () {
               setState(() {
-                if (isFavori) { globalFavoriSahneler.removeWhere((f) => f["videoUrl"] == sahne["videoUrl"]); } 
-                else { globalFavoriSahneler.add(sahne); }
+                if (isFavori) { globalFavoriSahneler.removeWhere((f) => f["videoUrl"] == sahne["videoUrl"]); }
+                else { globalFavoriSahneler.add(Map<String, dynamic>.from(sahne as Map)); }
               });
+              favorileriKaydet();
             },
           );
         },
@@ -652,24 +743,33 @@ class ReelsVideoOgesi extends StatefulWidget {
   const ReelsVideoOgesi({super.key, required this.sahne, required this.isFocused, required this.isFavori, required this.onFavoriToggle});
 
   @override
-  _ReelsVideoOgesiState createState() => _ReelsVideoOgesiState();
+  State<ReelsVideoOgesi> createState() => _ReelsVideoOgesiState();
 }
 
 class _ReelsVideoOgesiState extends State<ReelsVideoOgesi> {
   VideoPlayerController? _controller;
   bool _isPlayerReady = false;
-  bool _sesAcik = true; 
+  bool _sesAcik = true;
+  bool _videoHatasi = false;
 
   @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.sahne["videoUrl"]))
-      ..initialize().then((_) {
-        setState(() { _isPlayerReady = true; });
-        _controller!.setVolume(1.0); 
-        _controller!.setLooping(true); 
-        if (widget.isFocused) { _controller!.play(); } 
-      });
+    final adres = Uri.tryParse(_alan(widget.sahne, "videoUrl"));
+    if (adres == null || !adres.hasScheme) { _videoHatasi = true; return; }
+    final controller = VideoPlayerController.networkUrl(adres);
+    _controller = controller;
+    controller.initialize().then((_) {
+      // Video yüklenirken sayfadan çıkıldıysa dispose edilmiş state'e dokunma.
+      if (!mounted) return;
+      setState(() { _isPlayerReady = true; });
+      controller.setVolume(_sesAcik ? 1.0 : 0.0);
+      controller.setLooping(true);
+      if (widget.isFocused) { controller.play(); }
+    }).catchError((Object e) {
+      debugPrint("Video yüklenemedi: $e");
+      if (mounted) setState(() { _videoHatasi = true; });
+    });
   }
 
   @override
@@ -711,9 +811,11 @@ class _ReelsVideoOgesiState extends State<ReelsVideoOgesi> {
                   ),
                 ),
               )
-            : const Center(child: CircularProgressIndicator(color: Colors.pinkAccent)),
+            : _videoHatasi
+                ? const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.error_outline_rounded, color: Colors.white54, size: 60), SizedBox(height: 10), Text("Bu video yüklenemedi.\nKaydırarak devam edin.", textAlign: TextAlign.center, style: TextStyle(color: Colors.white70))]))
+                : const Center(child: CircularProgressIndicator(color: Colors.pinkAccent)),
 
-        Container(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.bottomRight, end: Alignment.center, colors: [Colors.black.withOpacity(0.4), Colors.transparent]))),
+        IgnorePointer(child: Container(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.bottomRight, end: Alignment.center, colors: [Colors.black.withValues(alpha: 0.4), Colors.transparent])))),
 
         Positioned(
           right: 15, bottom: 40,
@@ -749,149 +851,208 @@ class KonusmaPratigiEkrani extends StatefulWidget {
   const KonusmaPratigiEkrani({super.key});
 
   @override
-  _KonusmaPratigiEkraniState createState() => _KonusmaPratigiEkraniState();
+  State<KonusmaPratigiEkrani> createState() => _KonusmaPratigiEkraniState();
 }
 
 class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
-  late stt.SpeechToText _speechToText;
-  late FlutterTts _flutterTts;
+  final stt.SpeechToText _speechToText = stt.SpeechToText();
+  final FlutterTts _flutterTts = FlutterTts();
+  bool _speechHazir = false;
   bool _isListening = false;
   String _kullaniciMetni = "";
-  
+
   final List<Map<String, String>> _mesajlar = [];
+  final ScrollController _scrollController = ScrollController();
   bool _aiDusunuyor = false;
 
-  final String apiKey = "AIzaSyBJH9mdLFIuf4b7BbaoBkSsSTNxULnxuoA"; 
-  late GenerativeModel _model;
-  late ChatSession _chat;
+  ChatSession? _chat;
 
   // Ses çeşitliliği için listeler
   List<Map<dynamic, dynamic>> _ingilizceSesler = [];
 
+  static const String _karsilama = "Hello! I am your English teacher. How are you doing today?";
+
   @override
   void initState() {
     super.initState();
-    _speechToText = stt.SpeechToText();
-    _flutterTts = FlutterTts();
-    _sesAyarlariniYap();
     _yapayZekayiBaslat();
+    _sesAyarlariniYap().then((_) { if (mounted) _sesliOku(_karsilama); });
   }
 
-  void _sesAyarlariniYap() async {
-    await _flutterTts.setLanguage("en-US");
-    await _flutterTts.setPitch(1.0); // Doğal ton
-    await _flutterTts.setSpeechRate(0.5); // TAM GÜNLÜK KONUŞMA HIZI (Sabit)
+  @override
+  void dispose() {
+    // Ekrandan çıkınca öğretmen konuşmaya ve mikrofon dinlemeye devam etmesin.
+    _speechToText.cancel();
+    _flutterTts.stop();
+    _scrollController.dispose();
+    super.dispose();
+  }
 
-    // Telefonda yüklü olan İngilizce sesleri (Farklı AI seslerini) bul
-    List<dynamic> sesler = await _flutterTts.getVoices;
-    List<Map<dynamic, dynamic>> filtrelenmis = [];
-    for (var ses in sesler) {
-      // Sadece İngilizce olanları al (en-US, en-GB, en-AU vb.)
-      if (ses["locale"] != null && ses["locale"].toString().startsWith("en-")) {
-        filtrelenmis.add(ses);
+  Future<void> _sesAyarlariniYap() async {
+    try {
+      await _flutterTts.setLanguage("en-US");
+      await _flutterTts.setPitch(1.0); // Doğal ton
+      await _flutterTts.setSpeechRate(0.5); // TAM GÜNLÜK KONUŞMA HIZI (Sabit)
+
+      // Cihazda yüklü olan İngilizce sesleri bul (en-US, en-GB, en-AU vb.)
+      final dynamic sesler = await _flutterTts.getVoices;
+      final List<Map<dynamic, dynamic>> filtrelenmis = [];
+      if (sesler is List) {
+        for (final ses in sesler) {
+          if (ses is Map && (ses["locale"] ?? "").toString().toLowerCase().startsWith("en")) {
+            filtrelenmis.add(ses);
+          }
+        }
       }
-    }
-    
-    if (mounted) {
-      setState(() { _ingilizceSesler = filtrelenmis; });
+      if (mounted) setState(() { _ingilizceSesler = filtrelenmis; });
+    } catch (e) {
+      debugPrint("TTS ayar hatası: $e");
     }
   }
 
   // Sağ üstteki menüden ses değiştirildiğinde çalışır
-  void _sesiDegistir(Map<dynamic, dynamic> yeniSes) async {
-    await _flutterTts.setVoice({"name": yeniSes["name"], "locale": yeniSes["locale"]});
-    // Her değiştirdiğinde hızı tekrar sabitliyoruz ki bozulmasın
-    await _flutterTts.setSpeechRate(0.5); 
-    _sesliOku("Hi! I am your new teacher."); 
+  Future<void> _sesiDegistir(Map<dynamic, dynamic> yeniSes) async {
+    try {
+      await _flutterTts.setVoice({"name": yeniSes["name"].toString(), "locale": yeniSes["locale"].toString()});
+      // Her değiştirdiğinde hızı tekrar sabitliyoruz ki bozulmasın
+      await _flutterTts.setSpeechRate(0.5);
+      await _sesliOku("Hi! I am your new teacher.");
+    } catch (e) {
+      debugPrint("Ses değiştirilemedi: $e");
+    }
   }
 
   void _yapayZekayiBaslat() {
-    _model = GenerativeModel(
-      model: 'gemini-1.5-flash',
-      apiKey: apiKey,
+    _mesajlar.add({"gonderen": "AI", "metin": _karsilama});
+
+    if (geminiApiKey.isEmpty) {
+      _mesajlar.add({"gonderen": "AI", "metin": "⚠️ Gemini API anahtarı tanımlı değil. Uygulamayı --dart-define=GEMINI_API_KEY=... ile derleyin."});
+      return;
+    }
+
+    final model = GenerativeModel(
+      model: geminiModel,
+      apiKey: geminiApiKey,
       systemInstruction: Content.system("Sen arkadaş canlısı ve cesaretlendirici bir İngilizce öğretmenisin. Karşındaki kişi A2 seviyesinde İngilizce pratik yapmak istiyor. Onunla sadece İngilizce konuş. Yanıtların çok kısa, günlük hayattan ve anlaşılır olsun (en fazla 2-3 cümle). Eğer İngilizce gramer hatası yaparsa, çok nazikçe doğrusunu söyleyip sohbete devam et."),
     );
-    _chat = _model.startChat();
-    
-    _mesajEkle("AI", "Hello! I am your English teacher. How are you doing today?");
-    _sesliOku("Hello! I am your English teacher. How are you doing today?");
+    _chat = model.startChat();
   }
 
   void _mesajEkle(String gonderen, String metin) {
+    if (!mounted) return;
     setState(() {
       _mesajlar.add({"gonderen": gonderen, "metin": metin});
     });
+    // Yeni mesaj gelince sohbeti en alta kaydır.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(_scrollController.position.maxScrollExtent, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+      }
+    });
   }
 
-  // Yeni Mikrofona Dokunma (Toggle) Mantığı
-  void _mikrofonuTetikle() async {
+  // Mikrofona Dokunma (Toggle) Mantığı
+  Future<void> _mikrofonuTetikle() async {
+    if (_aiDusunuyor) return;
     if (_isListening) {
-      _dinlemeyiDurdur(); // Zaten dinliyorsa durdur ve gönder
-    } else {
-      bool available = await _speechToText.initialize(
-        onStatus: (status) {
-          // Kullanıcı susarsa otomatik olarak göndermesi için
-          if (status == 'done') {
-            setState(() => _isListening = false);
-            _yapayZekayaGonder(_kullaniciMetni);
-          }
-        },
-        onError: (errorNotification) => print('Hata: $errorNotification'),
-      );
+      await _dinlemeyiBitir(); // Zaten dinliyorsa durdur ve gönder
+      return;
+    }
 
-      if (available) {
-        setState(() {
-          _isListening = true;
-          _kullaniciMetni = "";
-        });
-        _speechToText.listen(
-          onResult: (result) {
-            setState(() { _kullaniciMetni = result.recognizedWords; });
+    try {
+      // Motor sadece bir kez kurulur; her dokunuşta yeniden kurmak çift tetiklemeye yol açıyordu.
+      if (!_speechHazir) {
+        _speechHazir = await _speechToText.initialize(
+          onStatus: (status) {
+            // Kullanıcı susarsa otomatik olarak gönder
+            if (status == 'done' || status == 'notListening') _dinlemeyiBitir();
           },
-          localeId: "en_US", 
+          onError: (hata) {
+            debugPrint('Konuşma tanıma hatası: $hata');
+            if (mounted) setState(() => _isListening = false);
+          },
         );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Mikrofon izni alınamadı.")));
+      }
+      if (!mounted) return;
+
+      if (!_speechHazir) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Mikrofon izni alınamadı veya konuşma tanıma desteklenmiyor.")));
+        return;
+      }
+
+      // Öğretmen konuşurken dinlemeye başlarsak mikrofon öğretmenin sesini yazar.
+      await _flutterTts.stop();
+      if (!mounted) return;
+      setState(() {
+        _isListening = true;
+        _kullaniciMetni = "";
+      });
+      await _speechToText.listen(
+        onResult: (result) {
+          if (mounted && _isListening) setState(() { _kullaniciMetni = result.recognizedWords; });
+        },
+        localeId: "en_US",
+      );
+    } catch (e) {
+      debugPrint("Mikrofon başlatılamadı: $e");
+      if (mounted) {
+        setState(() => _isListening = false);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Mikrofon başlatılamadı.")));
       }
     }
   }
 
-  void _dinlemeyiDurdur() {
-    _speechToText.stop();
-    setState(() => _isListening = false);
-    _yapayZekayaGonder(_kullaniciMetni);
+  // Hem "durdur" tuşu hem de motorun 'done' bildirimi buraya gelir;
+  // _isListening bayrağı sayesinde mesaj yalnızca BİR kez gönderilir.
+  Future<void> _dinlemeyiBitir() async {
+    if (!_isListening) return;
+    _isListening = false;
+    final mesaj = _kullaniciMetni;
+    if (mounted) setState(() {});
+    try { await _speechToText.stop(); } catch (e) { debugPrint("Dinleme durdurulamadı: $e"); }
+    await _yapayZekayaGonder(mesaj);
   }
 
   Future<void> _yapayZekayaGonder(String mesaj) async {
-    if (mesaj.trim().isEmpty) return;
-    
-    _mesajEkle("Sen", mesaj);
+    if (mesaj.trim().isEmpty || _aiDusunuyor || !mounted) return;
+
+    _mesajEkle("Sen", mesaj.trim());
     setState(() {
       _kullaniciMetni = "";
       _aiDusunuyor = true;
     });
 
     try {
-      // Mesajı içeriğe dönüştürüp gönderiyoruz
-      final content = [Content.text(mesaj)];
-      // Mevcut satırın yerine bunu dene:
-final response = await _chat.sendMessage(Content.text(mesaj));
-      
-      final aiCevabi = response.text ?? "I'm listening, but I couldn't form a sentence.";
-      
+      final chat = _chat;
+      if (chat == null) {
+        _mesajEkle("AI", "⚠️ Gemini API anahtarı tanımlı değil.");
+        return;
+      }
+      final response = await chat.sendMessage(Content.text(mesaj.trim())).timeout(const Duration(seconds: 30));
+      final cevap = response.text?.trim();
+      final aiCevabi = (cevap == null || cevap.isEmpty) ? "I'm listening, but I couldn't form a sentence." : cevap;
+
       _mesajEkle("AI", aiCevabi);
-      _sesliOku(aiCevabi);
+      if (mounted) _sesliOku(aiCevabi);
     } catch (e) {
-      // Hatanın tam nedenini görmek için mesajı güncelledik
-      print("AI Hatası: $e");
-      _mesajEkle("AI", "Error: ${e.toString().contains('403') ? 'API Key is not ready yet' : 'Connection problem'}.");
+      debugPrint("AI Hatası: $e");
+      final hata = e.toString();
+      String aciklama = "Connection problem. Please check your internet";
+      if (e is InvalidApiKey || hata.contains('API key') || hata.contains('403') || hata.contains('PERMISSION_DENIED')) {
+        aciklama = "API key is invalid or not allowed";
+      } else if (hata.contains('not found') || hata.contains('404')) {
+        aciklama = "Model '$geminiModel' is not available";
+      } else if (hata.contains('quota') || hata.contains('429')) {
+        aciklama = "Daily limit reached, try again later";
+      }
+      _mesajEkle("AI", "Error: $aciklama.");
     } finally {
-      setState(() => _aiDusunuyor = false);
+      if (mounted) setState(() => _aiDusunuyor = false);
     }
   }
 
   Future<void> _sesliOku(String metin) async {
-    await _flutterTts.speak(metin);
+    try { await _flutterTts.speak(metin); } catch (e) { debugPrint("TTS hatası: $e"); }
   }
 
   @override
@@ -932,6 +1093,7 @@ final response = await _chat.sendMessage(Content.text(mesaj));
         children: [
           Expanded(
             child: ListView.builder(
+              controller: _scrollController,
               padding: const EdgeInsets.all(20),
               itemCount: _mesajlar.length,
               itemBuilder: (context, index) {
@@ -944,7 +1106,7 @@ final response = await _chat.sendMessage(Content.text(mesaj));
                     margin: const EdgeInsets.only(bottom: 15),
                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
                     decoration: BoxDecoration(
-                      color: isSen ? Colors.deepPurpleAccent : Colors.white.withOpacity(0.1),
+                      color: isSen ? Colors.deepPurpleAccent : Colors.white.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.only(
                         topLeft: const Radius.circular(20),
                         topRight: const Radius.circular(20),
@@ -971,7 +1133,7 @@ final response = await _chat.sendMessage(Content.text(mesaj));
           Container(
             padding: const EdgeInsets.symmetric(vertical: 30, horizontal: 20),
             decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.3),
+              color: Colors.black.withValues(alpha: 0.3),
               borderRadius: const BorderRadius.only(topLeft: Radius.circular(30), topRight: Radius.circular(30)),
             ),
             child: Column(
@@ -994,10 +1156,10 @@ final response = await _chat.sendMessage(Content.text(mesaj));
                     duration: const Duration(milliseconds: 300),
                     padding: EdgeInsets.all(_isListening ? 30 : 20),
                     decoration: BoxDecoration(
-                      color: _isListening ? Colors.greenAccent.withOpacity(0.8) : Colors.deepPurpleAccent,
+                      color: _isListening ? Colors.greenAccent.withValues(alpha: 0.8) : Colors.deepPurpleAccent,
                       shape: BoxShape.circle,
                       boxShadow: [
-                        if (_isListening) BoxShadow(color: Colors.greenAccent.withOpacity(0.6), blurRadius: 20, spreadRadius: 10)
+                        if (_isListening) BoxShadow(color: Colors.greenAccent.withValues(alpha: 0.6), blurRadius: 20, spreadRadius: 10)
                       ]
                     ),
                     child: Icon(_isListening ? Icons.stop_rounded : Icons.mic_rounded, color: Colors.white, size: _isListening ? 50 : 40),

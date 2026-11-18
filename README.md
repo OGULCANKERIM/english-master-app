@@ -1,16 +1,24 @@
-# yeni_english
+# English Master
 
-A new Flutter project.
+Flutter ile yazılmış İngilizce öğrenme uygulaması.
 
-## Getting Started
+- **Vocabulary List** – seviye / harf / kelime türüne göre filtrelenen kelime kartları, sesli okuma ve quiz
+- **Reels Mode** – dikey kaydırmalı kısa video kesitleri
+- **Favorite Videos** – beğenilen videolar (cihazda kalıcı saklanır)
+- **Speaking Practice** – Gemini destekli sesli İngilizce konuşma pratiği
 
-This project is a starting point for a Flutter application.
+## Çalıştırma
 
-A few resources to get you started if this is your first Flutter project:
+Gemini API anahtarı koda yazılmaz, derleme sırasında verilir:
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+```
+flutter pub get
+flutter run --dart-define=GEMINI_API_KEY=ANAHTARINIZ
+```
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+İsteğe bağlı: `--dart-define=GEMINI_MODEL=gemini-3.8-flash` ile model değiştirilebilir.
+
+## Otomatik derleme (GitHub Actions)
+
+`main` dalına her push'ta APK derlenir ve Firebase App Distribution'a yüklenir.
+Gerekli repo secret'ları: `GEMINI_API_KEY`, `FIREBASE_APP_ID`, `FIREBASE_TOKEN`.
