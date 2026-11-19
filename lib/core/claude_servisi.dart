@@ -8,9 +8,12 @@ import 'ayarlar.dart';
 
 /// Claude'dan yanıt alınamadığında atılır. [kullaniciMesaji] ekranda gösterilecek metindir.
 class ClaudeHatasi implements Exception {
-  const ClaudeHatasi(this.kullaniciMesaji);
+  const ClaudeHatasi(this.kullaniciMesaji, {this.baglantiSorunu = false});
 
   final String kullaniciMesaji;
+
+  /// Geçici bir sorun mu (internet yok, zaman aşımı, servis meşgul)? Yeniden denemek işe yarayabilir.
+  final bool baglantiSorunu;
 
   @override
   String toString() => 'ClaudeHatasi: $kullaniciMesaji';
@@ -81,10 +84,10 @@ class ClaudeServisi {
           )
           .timeout(const Duration(seconds: 60));
     } on TimeoutException {
-      throw const ClaudeHatasi("Error: The answer took too long. Please try again.");
+      throw const ClaudeHatasi("Error: The answer took too long. Please try again.", baglantiSorunu: true);
     } catch (e) {
       debugPrint("Claude bağlantı hatası: $e");
-      throw const ClaudeHatasi("Error: Connection problem. Please check your internet.");
+      throw const ClaudeHatasi("Error: Connection problem. Please check your internet.", baglantiSorunu: true);
     }
 
     dynamic govde;
@@ -106,7 +109,9 @@ class ClaudeServisi {
         529 => "The AI service is busy, try again in a moment",
         _ => apiMesaji.isNotEmpty ? apiMesaji : "Server error (${response.statusCode})",
       };
-      throw ClaudeHatasi("Error: $aciklama.");
+      // 429, 529 ve 5xx geçicidir; 401/403/404 gibi hatalar yeniden denemekle düzelmez.
+      final int kod = response.statusCode;
+      throw ClaudeHatasi("Error: $aciklama.", baglantiSorunu: kod == 429 || kod >= 500);
     }
 
     if (govde is Map && govde['stop_reason'] == 'refusal') {

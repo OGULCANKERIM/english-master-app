@@ -8,6 +8,27 @@ import '../core/ayarlar.dart';
 import '../core/globals.dart';
 import '../services/ai_coach_system.dart';
 
+/// Tablodan gelen satırları uygulamanın kullandığı düzgün biçime çevirir:
+/// bütün alanlar kırpılmış metin olur (eksik hücre = boş metin), seviye büyük harfe
+/// ("a1" -> "A1"), tür küçük harfe çevrilir. İngilizcesi ya da Türkçesi olmayan satırlar atılır.
+List<Map<String, String>> kelimeleriDuzenle(List<dynamic> satirlar) {
+  final List<Map<String, String>> sonuc = [];
+  for (final satir in satirlar) {
+    if (satir is! Map) continue;
+    final String ing = alan(satir, "ing");
+    final String tr = alan(satir, "tr");
+    if (ing.isEmpty || tr.isEmpty) continue;
+    sonuc.add({
+      "ing": ing,
+      "tr": tr,
+      "type": alan(satir, "type").toLowerCase(),
+      "lvl": alan(satir, "lvl").toUpperCase(),
+      "sentence": alan(satir, "sentence"),
+    });
+  }
+  return sonuc;
+}
+
 /// Kelime için Pixabay'den bir çizim adresi getirir. Anahtar yoksa, sonuç yoksa ya da
 /// herhangi bir hata olursa null döner; kart o zaman resimsiz gösterilir.
 Future<String?> kelimeResmiGetir(String kelime, {http.Client? istemci, String anahtar = pixabayApiKey}) async {
@@ -167,7 +188,7 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
       final response = await http.get(url).timeout(const Duration(seconds: 30));
       if (!mounted) return;
       if (response.statusCode == 200) {
-        tumKelimeler = jsonListeCoz(response);
+        tumKelimeler = kelimeleriDuzenle(jsonListeCoz(response));
         _desteyiHazirla();
         setState(() { isLoading = false; hataMesaji = ""; });
       } else { setState(() { hataMesaji = "Server Error: ${response.statusCode}"; isLoading = false; }); }
@@ -286,9 +307,9 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
                                     final k = ogrenilenKelimeler[index];
                                     return ListTile(
                                       leading: const Icon(Icons.rocket_launch_rounded, color: Colors.amberAccent),
-                                      title: Text(k["ing"], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                                      subtitle: Text(k["tr"]),
-                                      trailing: IconButton(icon: const Icon(Icons.volume_up_rounded), onPressed: () => metniOku(k["ing"])),
+                                      title: Text(alan(k, "ing"), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                                      subtitle: Text(alan(k, "tr")),
+                                      trailing: IconButton(icon: const Icon(Icons.volume_up_rounded), onPressed: () => metniOku(alan(k, "ing"))),
                                     );
                                   },
                                 ),
@@ -301,7 +322,7 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
                                     final k = kelimeDestesi[index];
                                     return ListTile(
                                       leading: Icon(Icons.access_time_filled_rounded, color: theme.primaryColor.withValues(alpha: 0.5)),
-                                      title: Text(k["ing"], style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: theme.textTheme.bodyLarge?.color?.withValues(alpha: 0.7))),
+                                      title: Text(alan(k, "ing"), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: theme.textTheme.bodyLarge?.color?.withValues(alpha: 0.7))),
                                       subtitle: const Text("Waiting in cycle..."),
                                     );
                                   },
@@ -581,7 +602,7 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
   }
 
   Widget _buildStaticDepthCard(dynamic kelimeVerisi, ThemeData theme, bool isDark) {
-    Color staticTurRengi = turRenkleri[kelimeVerisi["type"]] ?? theme.primaryColor;
+    Color staticTurRengi = turRenkleri[alan(kelimeVerisi, "type")] ?? theme.primaryColor;
     return Container(
       height: 480, width: double.infinity, margin: const EdgeInsets.symmetric(horizontal: 24),
       decoration: BoxDecoration(
@@ -608,13 +629,13 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(color: aktifAuraRengi.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(20), border: Border.all(color: aktifAuraRengi.withValues(alpha: 0.5))),
-              child: Text(turEtiketleri[kelimeVerisi["type"]]?.split("(")[0] ?? kelimeVerisi["type"] ?? "?", style: TextStyle(color: aktifAuraRengi, fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 1.5))
+              child: Text(turEtiketleri[alan(kelimeVerisi, "type")]?.split("(")[0] ?? (alan(kelimeVerisi, "type").isEmpty ? "?" : alan(kelimeVerisi, "type")), style: TextStyle(color: aktifAuraRengi, fontWeight: FontWeight.bold, fontSize: 13, letterSpacing: 1.5))
             )
           ),
           const Spacer(),
-          Text(kelimeVerisi["ing"], style: GoogleFonts.poppins(fontSize: 50, fontWeight: FontWeight.w800, color: theme.textTheme.bodyLarge?.color), textAlign: TextAlign.center),
+          Text(alan(kelimeVerisi, "ing"), style: GoogleFonts.poppins(fontSize: 50, fontWeight: FontWeight.w800, color: theme.textTheme.bodyLarge?.color), textAlign: TextAlign.center),
           const SizedBox(height: 15),
-          IconButton(icon: Icon(Icons.volume_up_rounded, size: 45, color: aktifAuraRengi), onPressed: () { metniOku(kelimeVerisi["ing"]); }),
+          IconButton(icon: Icon(Icons.volume_up_rounded, size: 45, color: aktifAuraRengi), onPressed: () { metniOku(alan(kelimeVerisi, "ing")); }),
           const Spacer(),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 12),
@@ -666,16 +687,16 @@ class _SeviyeliKelimeEkraniState extends State<SeviyeliKelimeEkrani> {
             )
           ),
           const SizedBox(height: 15),
-          Text(kelimeVerisi["tr"], style: TextStyle(fontSize: 28, color: aktifAuraRengi, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+          Text(alan(kelimeVerisi, "tr"), style: TextStyle(fontSize: 28, color: aktifAuraRengi, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
           const SizedBox(height: 15),
-          Container(
+          if (alan(kelimeVerisi, "sentence").isNotEmpty) Container(
             padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
             decoration: BoxDecoration(color: theme.cardColor.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(20), border: Border.all(color: aktifAuraRengi.withValues(alpha: 0.2))),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Flexible(child: Text("\"${kelimeVerisi["sentence"]}\"", textAlign: TextAlign.center, style: GoogleFonts.lora(fontSize: 16, fontStyle: FontStyle.italic, color: theme.textTheme.bodyLarge?.color?.withValues(alpha: 0.9)))),
-                IconButton(icon: Icon(Icons.volume_down_rounded, size: 24, color: theme.textTheme.bodyLarge?.color?.withValues(alpha: 0.7)), onPressed: () => metniOku(kelimeVerisi["sentence"]))
+                Flexible(child: Text("\"${alan(kelimeVerisi, "sentence")}\"", textAlign: TextAlign.center, style: GoogleFonts.lora(fontSize: 16, fontStyle: FontStyle.italic, color: theme.textTheme.bodyLarge?.color?.withValues(alpha: 0.9)))),
+                IconButton(icon: Icon(Icons.volume_down_rounded, size: 24, color: theme.textTheme.bodyLarge?.color?.withValues(alpha: 0.7)), onPressed: () => metniOku(alan(kelimeVerisi, "sentence")))
               ]
             ),
           ),

@@ -83,7 +83,11 @@ class _EslestirmeModuluState extends State<EslestirmeModulu> with TickerProvider
       secilenler.add(k);
       if (secilenler.length == 4) break;
     }
-    if (secilenler.length < 4) return;
+    if (secilenler.length < 4) {
+      // Boş masa yerine ne olduğunu söyle.
+      if (mounted) setState(() { boardCards = []; hataMesaji = "Not enough different words to play yet."; });
+      return;
+    }
 
     List<MatchCardModel> tempCards = [];
     int currentId = 0;

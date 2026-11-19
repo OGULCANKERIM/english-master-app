@@ -492,23 +492,54 @@ class _AnaMenuEkraniState extends State<AnaMenuEkrani> {
   }
 }
 /// "Welcome, ad" yazısı: giriş yapılmışsa profildeki ad, yapılmamışsa "Guest".
-class _KarsilamaYazisi extends StatelessWidget {
+class _KarsilamaYazisi extends StatefulWidget {
   const _KarsilamaYazisi({required this.stil});
 
   final TextStyle stil;
 
-  Widget _yazi(String ad) => Text("Welcome, $ad", style: stil, maxLines: 1, overflow: TextOverflow.ellipsis);
+  @override
+  State<_KarsilamaYazisi> createState() => _KarsilamaYazisiState();
+}
+
+class _KarsilamaYazisiState extends State<_KarsilamaYazisi> {
+  // Akışlar bir kez kurulur; menü her yeniden çizildiğinde (ör. tema değişince)
+  // Firestore'a yeniden abone olunmaz.
+  late final Stream<String?> _oturum = HesapServisi.oturumuIzle();
+  String? _profilUid;
+  Stream<Kullanici?>? _profil;
+
+  Stream<Kullanici?>? _profilAkisi(String uid) {
+    if (_profilUid != uid) {
+      _profilUid = uid;
+      try {
+        _profil = HesapServisi.profilimiIzle();
+      } catch (e) {
+        // Tam bu anda çıkış yapıldıysa profil akışı kurulamaz; "Friend" gösterilir.
+        debugPrint("Profil akışı kurulamadı: $e");
+        _profil = null;
+        _profilUid = null;
+      }
+    }
+    return _profil;
+  }
+
+  Widget _yazi(String ad) => Text("Welcome, $ad", style: widget.stil, maxLines: 1, overflow: TextOverflow.ellipsis);
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<String?>(
-      stream: HesapServisi.oturumuIzle(),
+      stream: _oturum,
       builder: (context, oturum) {
-        if (oturum.data == null) return _yazi("Guest");
+        final String? uid = oturum.data;
+        if (uid == null) {
+          _profilUid = null;
+          _profil = null;
+          return _yazi("Guest");
+        }
         return StreamBuilder<Kullanici?>(
           // uid değişince (başka hesapla giriş) akış yeniden kurulur.
-          key: ValueKey(oturum.data),
-          stream: HesapServisi.profilimiIzle(),
+          key: ValueKey(uid),
+          stream: _profilAkisi(uid),
           builder: (context, profil) {
             final String ad = profil.data?.ad.trim() ?? "";
             return _yazi(ad.isEmpty ? "Friend" : ad.split(" ").first);

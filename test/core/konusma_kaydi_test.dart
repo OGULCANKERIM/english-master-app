@@ -4,6 +4,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:yeni_english/core/konusma_kaydi.dart';
 
 KayitliSohbet _ornek([String konu = 'a']) => KayitliSohbet(
+      konu: 'Konu $konu',
+      mod: 'fun',
+      seviye: 'B1',
       sistem: 'sistem $konu',
       mesajlar: [
         {'gonderen': 'AI', 'metin': 'Hello şöyle', 'ceviriGoster': 'false'},
@@ -13,6 +16,7 @@ KayitliSohbet _ornek([String konu = 'a']) => KayitliSohbet(
         {'role': 'user', 'content': 'start'},
         {'role': 'assistant', 'content': 'Hello şöyle'},
         {'role': 'user', 'content': 'Hi'},
+        {'role': 'assistant', 'content': 'Nice to meet you'},
       ],
     );
 
@@ -22,8 +26,78 @@ void main() {
     expect(cozulen.length, 2);
     expect(cozulen[1].sistem, 'sistem b');
     expect(cozulen[0].mesajlar.first['metin'], 'Hello şöyle');
-    expect(cozulen[0].gecmis.length, 3);
-    expect(cozulen[0].gecmis.last, {'role': 'user', 'content': 'Hi'});
+    expect(cozulen[0].gecmis.length, 4);
+    expect(cozulen[0].gecmis.last, {'role': 'assistant', 'content': 'Nice to meet you'});
+    expect(cozulen[1].konu, 'Konu b');
+    expect(cozulen[1].mod, 'fun');
+    expect(cozulen[1].seviye, 'B1');
+  });
+
+  test('konu, karakter ve seviye olmayan eski kayıt da açılır', () {
+    final veri = _ornek().toJson()
+      ..remove('konu')
+      ..remove('mod')
+      ..remove('seviye');
+    final sohbet = KayitliSohbet.fromJson(veri)!;
+    expect(sohbet.konu, '');
+    expect(sohbet.mod, '');
+    expect(sohbet.seviye, '');
+  });
+
+  group('yanıtsız son mesaj', () {
+    final gecmis = [
+      {'role': 'user', 'content': 'start'},
+      {'role': 'assistant', 'content': 'Hello'},
+      {'role': 'user', 'content': 'Hi'},
+      {'role': 'assistant', 'content': 'Good'},
+      {'role': 'user', 'content': 'yanıtı gelmedi'},
+    ];
+    final mesajlar = [
+      {'gonderen': 'AI', 'metin': 'Hello'},
+      {'gonderen': 'Sen', 'metin': 'Hi'},
+      {'gonderen': 'AI', 'metin': 'Good'},
+      {'gonderen': 'Sen', 'metin': 'yanıtı gelmedi'},
+      {'gonderen': 'AI', 'metin': 'Error: Connection problem.'},
+    ];
+
+    test('kayda hazırlarken yanıtsız kullanıcı mesajı ve sonrası atılır', () {
+      final sohbet = kaydaHazirla(konu: 'k', mod: 'fun', seviye: 'A2', sistem: 's', gecmis: gecmis)!;
+      expect(sohbet.gecmis.length, 4);
+      expect(sohbet.gecmis.last['role'], 'assistant');
+      expect(sohbet.mesajlar.map((m) => m['metin']), ['Hello', 'Hi', 'Good']);
+      // Kaynak listeler değişmez.
+      expect(gecmis.length, 5);
+
+    });
+
+    test('kullanıcı hiç yanıt almadıysa sohbet kaydedilmez', () {
+      expect(
+        kaydaHazirla(konu: 'k', mod: 'fun', seviye: 'A2', sistem: 's', gecmis: gecmis.sublist(0, 2)),
+        isNull,
+      );
+      expect(
+        kaydaHazirla(konu: 'k', mod: 'fun', seviye: 'A2', sistem: 's', gecmis: [gecmis[0], gecmis[1], gecmis[4]]),
+        isNull,
+      );
+    });
+
+    test('rol sırası bozuk geçmiş kaydedilmez', () {
+      expect(
+        kaydaHazirla(konu: 'k', mod: 'fun', seviye: 'A2', sistem: 's', gecmis: [gecmis[0], gecmis[1], gecmis[1], gecmis[3]]),
+        isNull,
+      );
+    });
+
+    test('eski kayıtta kalmış yanıtsız mesaj okunurken temizlenir', () {
+      final veri = {
+        'sistem': 's',
+        'mesajlar': mesajlar.sublist(0, 4),
+        'gecmis': gecmis,
+      };
+      final sohbet = KayitliSohbet.fromJson(veri)!;
+      expect(sohbet.gecmis.last['role'], 'assistant');
+      expect(sohbet.gecmis.length, 4);
+    });
   });
 
   test('kayıt yoksa ya da bozuksa boş liste', () {

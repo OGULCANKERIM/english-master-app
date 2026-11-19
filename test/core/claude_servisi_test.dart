@@ -84,6 +84,24 @@ void main() {
     expect(await mesaj(500), contains('x'));
   });
 
+  test('geçici ve kalıcı hatalar ayırt edilir', () async {
+    Future<bool> gecici(int kod) async {
+      final servis = _servis((_) async => _yanit({}, kod));
+      try {
+        await servis.gonder(sistem: 's', mesajlar: _mesajlar);
+      } on ClaudeHatasi catch (h) {
+        return h.baglantiSorunu;
+      }
+      return false;
+    }
+
+    expect(await gecici(429), isTrue);
+    expect(await gecici(529), isTrue);
+    expect(await gecici(500), isTrue);
+    expect(await gecici(401), isFalse);
+    expect(await gecici(404), isFalse);
+  });
+
   test('JSON olmayan hata gövdesi çökmez', () async {
     final servis = _servis((_) async => http.Response('<html>bad gateway</html>', 502));
     await expectLater(servis.gonder(sistem: 's', mesajlar: _mesajlar), throwsA(isA<ClaudeHatasi>()));

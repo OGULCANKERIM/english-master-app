@@ -34,12 +34,13 @@ bool surumYeniMi(String uzak, String yerel) {
 }
 
 bool _kontrolEdildi = false;
+bool _kontrolSuruyor = false;
 
 /// Remote Config'teki `current_version` uygulamadan yeniyse güncelleme penceresi gösterir.
-/// Uygulama açıldıktan sonra yalnızca bir kez çalışır; hata olursa sessizce geçer.
+/// Başarılı bir kontrolden sonra bu oturumda yeniden çalışmaz; hata olursa sessizce geçer.
 Future<void> guncellemeKontrolEt(BuildContext context) async {
-  if (_kontrolEdildi || Firebase.apps.isEmpty) return;
-  _kontrolEdildi = true;
+  if (_kontrolEdildi || _kontrolSuruyor || Firebase.apps.isEmpty) return;
+  _kontrolSuruyor = true;
   try {
     final remoteConfig = FirebaseRemoteConfig.instance;
     await remoteConfig.setConfigSettings(RemoteConfigSettings(
@@ -48,9 +49,14 @@ Future<void> guncellemeKontrolEt(BuildContext context) async {
     ));
     await remoteConfig.fetchAndActivate();
     final String yeniSurum = remoteConfig.getString('current_version');
+    // Yalnızca başarılı kontrolden sonra işaretlenir: internet yokken yapılan
+    // kontrol sayılmaz, bir sonraki çağrıda yeniden denenir.
+    _kontrolEdildi = true;
     if (context.mounted && surumYeniMi(yeniSurum, uygulamaSurumu)) _guncellemePenceresi(context);
   } catch (e) {
     debugPrint("Güncelleme Hatası: $e");
+  } finally {
+    _kontrolSuruyor = false;
   }
 }
 

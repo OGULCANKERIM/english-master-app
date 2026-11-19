@@ -37,6 +37,8 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
   final List<Map<String, dynamic>> _sohbetGecmisi = [];
   // Açık sohbetin sistem metni (karakter + seviye + konu); sohbet başlarken belirlenir.
   String _aktifSistem = "";
+  // Her yeni/yüklenen sohbette artar; geç gelen bir yanıt başka sohbete yazılmasın diye kullanılır.
+  int _sohbetNo = 0;
   final List<KayitliSohbet> _kayitliSohbetler = [];
   static const String _kayitAnahtari = 'konusmaKayitlari';
 
@@ -126,18 +128,25 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
   }
 
   Future<void> _ilkKurulum() async {
-    final prefs = await SharedPreferences.getInstance();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      // Kayıtlı sohbetler en başta yüklenir: sonradan yüklenseydi bu arada saklanan
+      // bir sohbet eski kayıtların üzerine yazardı.
+      _sohbetleriYukle(prefs);
 
-    final String kayitliSeviye = await mevcutSeviye();
-    if (_seviyeler.contains(kayitliSeviye)) _seciliSeviye = kayitliSeviye;
+      String? kayitliMod = prefs.getString('aiMode');
+      if (kayitliMod != null && _aiModlari.containsKey(kayitliMod)) _seciliAiModu = kayitliMod;
 
-    String? kayitliMod = prefs.getString('aiMode');
-    if (kayitliMod != null && _aiModlari.containsKey(kayitliMod)) _seciliAiModu = kayitliMod;
+      String? kayitliSes = prefs.getString('aiVoice');
+      if (kayitliSes != null && _sesProfilleri.containsKey(kayitliSes)) _seciliSesProfili = kayitliSes;
+      if (mounted) setState(() {});
 
-    String? kayitliSes = prefs.getString('aiVoice');
-    if (kayitliSes != null && _sesProfilleri.containsKey(kayitliSes)) _seciliSesProfili = kayitliSes;
-
-    _sohbetleriYukle(prefs);
+      final String kayitliSeviye = await mevcutSeviye();
+      // Kullanıcı bu arada sohbete başladıysa seviyesi değiştirilmez.
+      if (mounted && _konuSecimEkraninda && _seviyeler.contains(kayitliSeviye)) setState(() => _seciliSeviye = kayitliSeviye);
+    } catch (e) {
+      debugPrint("Konuşma ayarları yüklenemedi: $e");
+    }
     await _cihazSesleriniBul();
     await _ttsAyarlariniUygula(okumaYap: false);
     if (mounted) setState(() {});
@@ -224,9 +233,8 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
   }
 
   void _sohbetleriYukle(SharedPreferences prefs) {
-    _kayitliSohbetler
-      ..clear()
-      ..addAll(kayitliSohbetleriCoz(prefs.getString(_kayitAnahtari)));
+    // Bu oturumda eklenmiş sohbet varsa korunur (kayıtlılar başa eklenir).
+    _kayitliSohbetler.insertAll(0, kayitliSohbetleriCoz(prefs.getString(_kayitAnahtari)));
   }
 
   Future<void> _sohbetleriKaydet() async {
@@ -240,13 +248,17 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
 
   /// Açık sohbette kullanıcı en az bir şey söylediyse onu kayıtlı sohbetlere ekler.
   void _acikSohbetiSakla() {
-    if (_mesajlar.length <= 1 || !gecmisGecerli(_sohbetGecmisi)) return;
-    _kayitliSohbetler.add(KayitliSohbet(
+    // Yanıtı gelmemiş son mesaj ile hata/uyarı balonları saklanmaz; kullanıcı hiç yanıt
+    // almadıysa (yalnızca açılış cümlesi varsa) saklanacak bir sohbet yoktur.
+    final KayitliSohbet? kayit = kaydaHazirla(
+      konu: _seciliKonu,
+      mod: _seciliAiModu,
+      seviye: _seciliSeviye,
       sistem: _aktifSistem,
-      // Çeviri durumu gibi geçici alanlar saklanmaz.
-      mesajlar: _mesajlar.map((m) => {"gonderen": m["gonderen"] ?? "", "metin": m["metin"] ?? "", "ceviriGoster": "false"}).toList(),
-      gecmis: _sohbetGecmisi.map((m) => Map<String, dynamic>.from(m)).toList(),
-    ));
+      gecmis: _sohbetGecmisi,
+    );
+    if (kayit == null) return;
+    _kayitliSohbetler.add(kayit);
     _sohbetleriKaydet();
   }
 
@@ -262,6 +274,7 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
   void _yeniSohbetBaslat() {
     _acikSohbetiSakla();
     _dinlemeyiIptalEt();
+    _sohbetNo++;
 
     setState(() {
       _mesajlar.clear();
@@ -280,9 +293,14 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
     _dinlemeyiIptalEt();
     _flutterTts.stop();
     final KayitliSohbet kayit = _kayitliSohbetler.removeAt(index);
+    _sohbetNo++;
     setState(() {
       _konuSecimEkraninda = false;
-      _seciliKonu = "Saved Conversation ${index + 1}";
+      // Sohbet kendi konusu, karakteri ve seviyesiyle açılır; eski kayıtlarda bunlar yoksa
+      // ekrandaki seçimler kalır.
+      if (kayit.konu.isNotEmpty) _seciliKonu = kayit.konu;
+      if (_aiModlari.containsKey(kayit.mod)) _seciliAiModu = kayit.mod;
+      if (_seviyeler.contains(kayit.seviye)) _seciliSeviye = kayit.seviye;
       _aiDusunuyor = false;
       _kullaniciMetni = "";
       _aktifSistem = kayit.sistem.isNotEmpty ? kayit.sistem : _sistemMetni();
@@ -468,28 +486,32 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
       _aiDusunuyor = true;
     });
 
-    // Yanıt gelene kadar kullanıcı başka sohbete geçerse bu yanıt o sohbete yazılmaz.
-    final List<Map<String, String>> buSohbet = _mesajlar;
-    final int sohbetBoyu = _mesajlar.length;
+    // Yanıt gelene kadar kullanıcı başka sohbete geçerse (yeni konu, kayıtlı sohbet, ekrandan
+    // çıkış) bu yanıt yok sayılır: o sohbetin ne balonlarına ne geçmişine ne de durumuna dokunulur.
+    final int buSohbet = _sohbetNo;
+    bool guncel() => mounted && buSohbet == _sohbetNo;
+
     _sohbetGecmisi.add({"role": "user", "content": mesaj.trim()});
-    bool basarili = false;
+    String? hata;
     try {
       final yanit = await ClaudeServisi.varsayilan.gonder(sistem: _aktifSistem, mesajlar: List.of(_sohbetGecmisi));
-      if (!mounted || !identical(buSohbet, _mesajlar) || _mesajlar.length != sohbetBoyu) return;
+      if (!guncel()) return;
       _sohbetGecmisi.add({"role": "assistant", "content": yanit.metin});
-      basarili = true;
       _mesajEkle("AI", yanit.metin);
       _sesliOku(yanit.metin);
     } on ClaudeHatasi catch (e) {
-      if (mounted && _mesajlar.length == sohbetBoyu) _mesajEkle("AI", e.kullaniciMesaji);
+      hata = e.kullaniciMesaji;
     } catch (e) {
       debugPrint("AI hatası: $e");
-      if (mounted && _mesajlar.length == sohbetBoyu) _mesajEkle("AI", "Error: Connection problem. Please check your internet.");
-    } finally {
-      // Yanıt alınamadıysa kullanıcı mesajını geçmişten çıkar; yoksa sıra (user/assistant) bozulur.
-      if (!basarili && _sohbetGecmisi.isNotEmpty && _sohbetGecmisi.last['role'] == 'user' && _sohbetGecmisi.length > 1) _sohbetGecmisi.removeLast();
-      if (mounted) setState(() => _aiDusunuyor = false);
+      hata = "Error: Connection problem. Please check your internet.";
     }
+    if (!guncel()) return;
+    if (hata != null) {
+      // Yanıt alınamadı: kullanıcı mesajını geçmişten çıkar; yoksa sıra (user/assistant) bozulur.
+      if (_sohbetGecmisi.length > 1 && _sohbetGecmisi.last['role'] == 'user') _sohbetGecmisi.removeLast();
+      _mesajEkle("AI", hata);
+    }
+    setState(() => _aiDusunuyor = false);
   }
 
   Future<void> _sesliOku(String metin) async {
@@ -504,6 +526,7 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
   void dispose() {
     // Ekrandan çıkınca sohbet saklanır; öğretmen konuşmaya ve mikrofon dinlemeye devam etmez.
     _acikSohbetiSakla();
+    _sohbetNo++;
     _speechToText.cancel();
     _flutterTts.stop();
     super.dispose();
@@ -821,7 +844,7 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
           children: [
             Padding(padding: const EdgeInsets.all(20.0), child: ElevatedButton.icon(onPressed: () { Navigator.pop(context); setState(() => _konuSecimEkraninda = true); }, icon: const Icon(Icons.dashboard_customize_rounded, color: Colors.white), label: const Text("Topic Library", style: TextStyle(color: Colors.white, fontSize: 16)), style: ElevatedButton.styleFrom(backgroundColor: theme.primaryColor, minimumSize: const Size(double.infinity, 55), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))))),
             Divider(color: theme.dividerColor),
-            Expanded(child: _kayitliSohbetler.isEmpty ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.history_rounded, color: theme.iconTheme.color?.withValues(alpha: 0.2), size: 60), const SizedBox(height: 10), Text("No past conversations", style: TextStyle(color: theme.textTheme.bodyLarge?.color?.withValues(alpha: 0.5)))])) : ListView.builder(itemCount: _kayitliSohbetler.length, itemBuilder: (context, index) { return ListTile(leading: Icon(Icons.chat_bubble_outline_rounded, color: theme.iconTheme.color?.withValues(alpha: 0.7)), title: Text("Saved Conversation ${index + 1}", style: TextStyle(color: theme.textTheme.bodyLarge?.color, fontWeight: FontWeight.w600)), trailing: IconButton(icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20), onPressed: () => _sohbetiSil(index)), onTap: () => _eskiSohbetiYukle(index)); })),
+            Expanded(child: _kayitliSohbetler.isEmpty ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.history_rounded, color: theme.iconTheme.color?.withValues(alpha: 0.2), size: 60), const SizedBox(height: 10), Text("No past conversations", style: TextStyle(color: theme.textTheme.bodyLarge?.color?.withValues(alpha: 0.5)))])) : ListView.builder(itemCount: _kayitliSohbetler.length, itemBuilder: (context, index) { return ListTile(leading: Icon(Icons.chat_bubble_outline_rounded, color: theme.iconTheme.color?.withValues(alpha: 0.7)), title: Text(_kayitliSohbetler[index].konu.isNotEmpty ? _kayitliSohbetler[index].konu : "Saved Conversation ${index + 1}", maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.textTheme.bodyLarge?.color, fontWeight: FontWeight.w600)), subtitle: Text("${_kayitliSohbetler[index].mesajlar.length} messages", style: TextStyle(color: theme.textTheme.bodyLarge?.color?.withValues(alpha: 0.5), fontSize: 12)), trailing: IconButton(icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20), onPressed: () => _sohbetiSil(index)), onTap: () => _eskiSohbetiYukle(index)); })),
           ],
         ),
       ),

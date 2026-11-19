@@ -58,6 +58,11 @@ void main() {
       expect(await AiCoachSystem.getLiveAdviceForScreen('AnaMenu', servis: servis), contains('keep pushing forward'));
     });
 
+    test('geçersiz anahtar gibi kalıcı hatada gerçek nedeni söyler', () async {
+      final servis = ClaudeServisi(anahtar: 'k', istemci: MockClient((_) async => http.Response('{}', 401)));
+      expect(await AiCoachSystem.getLiveAdviceForScreen('AnaMenu', servis: servis), contains('API key is invalid'));
+    });
+
     test('anahtar yoksa bunu açıkça söyler', () async {
       final servis = ClaudeServisi(anahtar: '', istemci: MockClient((_) async => http.Response('{}', 200)));
       expect(await AiCoachSystem.getLiveAdviceForScreen('AnaMenu', servis: servis), contains('ANTHROPIC_API_KEY'));

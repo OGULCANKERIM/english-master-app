@@ -49,6 +49,7 @@ class _OkumaPratigiEkraniState extends State<OkumaPratigiEkrani> {
 
   bool _sttHazirMi = false;
   int _metinIstegi = 0; // en son başlatılan metin isteği; eskiler yok sayılır
+  bool _metinHatasi = false; // metin üretilemedi: ekranda pratik kartı yerine hata gösterilir
 
   final Map<int, Map<String, dynamic>> _kullaniciVerileri = {};
 
@@ -151,6 +152,7 @@ class _OkumaPratigiEkraniState extends State<OkumaPratigiEkrani> {
       _isSpeaking = false;
       _aktifOkumaIndex = null;
       _metinYukleniyor = true;
+      _metinHatasi = false;
       _kullaniciVerileri.clear();
       _cumleler = [];
       _aktifDinlemeIndex = null;
@@ -159,6 +161,7 @@ class _OkumaPratigiEkraniState extends State<OkumaPratigiEkrani> {
 
     String yeniMetin;
     List<String> yeniCumleler = [];
+    bool hata = false;
     try {
       final String gelenMetin = await ClaudeServisi.varsayilan.sor(
         sistem: "You write short reading passages for English learners. Reply with the passage only: no title, no explanations, no markdown.",
@@ -169,9 +172,11 @@ class _OkumaPratigiEkraniState extends State<OkumaPratigiEkrani> {
       yeniCumleler = cumlelereBol(gelenMetin);
     } on ClaudeHatasi catch (e) {
       yeniMetin = e.kullaniciMesaji;
+      hata = true;
     } catch (e) {
       debugPrint("Okuma metni üretilemedi: $e");
       yeniMetin = "Connection error.";
+      hata = true;
     }
 
     // Bu arada yeni bir istek başladıysa (seviye değişti vb.) eski sonucu gösterme.
@@ -179,6 +184,7 @@ class _OkumaPratigiEkraniState extends State<OkumaPratigiEkrani> {
     setState(() {
       _okumaMetni = yeniMetin;
       _cumleler = yeniCumleler;
+      _metinHatasi = hata;
       _metinYukleniyor = false;
     });
   }
@@ -190,14 +196,15 @@ class _OkumaPratigiEkraniState extends State<OkumaPratigiEkrani> {
     }
 
     if (_aktifOkumaIndex != null) {
-      await _flutterTts.stop();
       int? oncekiIndex = _aktifOkumaIndex;
+      try { await _flutterTts.stop(); } catch (_) {}
+      if (!mounted) return;
       setState(() { _isSpeaking = false; _aktifOkumaIndex = null; });
       if (oncekiIndex == index) return;
     }
 
-    setState(() => _aktifOkumaIndex = index);
     if (index != -1 && index >= _cumleler.length) return;
+    setState(() => _aktifOkumaIndex = index);
     String okunacakMetin = index == -1 ? _okumaMetni : _cumleler[index];
     try { await _flutterTts.speak(okunacakMetin); } catch (e) { debugPrint("Okuma hatası: $e"); }
   }
@@ -209,20 +216,23 @@ class _OkumaPratigiEkraniState extends State<OkumaPratigiEkrani> {
     }
 
     if (_isSpeaking) {
-      await _flutterTts.stop();
+      try { await _flutterTts.stop(); } catch (_) {}
+      if (!mounted) return;
       setState(() => _isSpeaking = false);
       await Future.delayed(const Duration(milliseconds: 300));
     }
 
     if (_aktifDinlemeIndex == index) {
-      await _speechToText.stop();
+      try { await _speechToText.stop(); } catch (_) {}
       return;
     }
 
     if (_aktifDinlemeIndex != null) {
-      await _speechToText.stop();
+      try { await _speechToText.stop(); } catch (_) {}
       await Future.delayed(const Duration(milliseconds: 300));
     }
+    // Beklerken ekran kapandıysa mikrofon açılmaz.
+    if (!mounted) return;
 
     setState(() {
       _aktifDinlemeIndex = index;
@@ -503,7 +513,18 @@ Reply only with JSON: {"skor": 0-100, "geribildirim": "..."}
                   : ListView(
                       padding: const EdgeInsets.all(20),
                       children: [
-                        if (_okumaMetni.isNotEmpty)
+                        if (_metinHatasi)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 60, horizontal: 10),
+                            child: Column(
+                              children: [
+                                const Icon(Icons.cloud_off_rounded, color: Colors.white54, size: 56),
+                                const SizedBox(height: 15),
+                                Text(_okumaMetni, textAlign: TextAlign.center, style: GoogleFonts.poppins(color: Colors.white70, fontSize: 15)),
+                              ],
+                            ),
+                          )
+                        else if (_okumaMetni.isNotEmpty)
                           _pratikKartiOlustur(_okumaMetni, -1, "FULL PASSAGE"),
 
                         if (_cumleler.length > 1) ...[

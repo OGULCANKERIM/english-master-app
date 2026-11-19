@@ -77,6 +77,8 @@ KURALLAR:
       );
     } on ClaudeHatasi catch (e) {
       debugPrint("Nova yanıt veremedi: ${e.kullaniciMesaji}");
+      // Bağlantı sorunu geçicidir; anahtar/model gibi kalıcı sorunlar ise açıkça söylenir.
+      if (!e.baglantiSorunu) return e.kullaniciMesaji;
       return "I'm having a little cloud connection issue right now, but keep pushing forward, $userName! Harikasın!";
     } catch (e) {
       debugPrint("Nova hatası: $e");
@@ -90,6 +92,8 @@ KURALLAR:
 
     // Cache the initial text for the modal loading state
     
+    final Future<String> tavsiye = getLiveAdviceForScreen(screenName, data: data);
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -140,7 +144,7 @@ KURALLAR:
                   border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.2))
                 ),
                 child: FutureBuilder<String>(
-                  future: getLiveAdviceForScreen(screenName, data: data),
+                  future: tavsiye,
                   builder: (context, snapshot) {
                     if (snapshot.connectionState == ConnectionState.waiting) {
                       return Center(
