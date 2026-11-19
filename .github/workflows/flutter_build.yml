@@ -30,8 +30,8 @@ jobs:
         run: flutter pub get
 
       - name: Android APK Derle
-        # Gemini anahtari kodda degil, GitHub > Settings > Secrets > GEMINI_API_KEY icinde durur.
-        run: flutter build apk --release "--dart-define=GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}"
+        # Claude anahtari kodda degil, GitHub > Settings > Secrets > ANTHROPIC_API_KEY icinde durur.
+        run: flutter build apk --release "--dart-define=ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}"
 
       - name: APK Dosyasini Cantaya Koy (Artifact)
         uses: actions/upload-artifact@v4

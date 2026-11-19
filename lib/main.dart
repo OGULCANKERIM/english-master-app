@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_tts/flutter_tts.dart';
@@ -12,15 +14,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 // --- YENİ EKLENEN YAPAY ZEKA VE SES PAKETLERİ ---
 import 'package:speech_to_text/speech_to_text.dart' as stt;
-import 'package:google_generative_ai/google_generative_ai.dart';
 
 // ==========================================
 // DERLEME ZAMANI AYARLARI
 // ==========================================
 // API anahtarı ASLA koda yazılmaz. Derlerken şu şekilde verilir:
-//   flutter run --dart-define=GEMINI_API_KEY=xxxx
-const String geminiApiKey = String.fromEnvironment('GEMINI_API_KEY');
-const String geminiModel = String.fromEnvironment('GEMINI_MODEL', defaultValue: 'gemini-3.8-flash');
+//   flutter run --dart-define=ANTHROPIC_API_KEY=xxxx
+const String claudeApiKey = String.fromEnvironment('ANTHROPIC_API_KEY');
+const String claudeModel = String.fromEnvironment('CLAUDE_MODEL', defaultValue: 'claude-opus-5-5');
 
 // pubspec.yaml içindeki "version" ile aynı tutulmalı (güncelleme kontrolü bunu kullanır).
 const String uygulamaSurumu = "1.0.0";
@@ -865,7 +866,11 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
   final ScrollController _scrollController = ScrollController();
   bool _aiDusunuyor = false;
 
-  ChatSession? _chat;
+  // Claude'a her istekte gönderilen sohbet geçmişi (user / assistant sırayla).
+  // Asistan yanıtlarının "content" dizisi API'den geldiği gibi, değiştirilmeden saklanır.
+  final List<Map<String, dynamic>> _gecmis = [];
+
+  static const String _sistemTalimati = "Sen arkadaş canlısı ve cesaretlendirici bir İngilizce öğretmenisin. Karşındaki kişi A2 seviyesinde İngilizce pratik yapmak istiyor. Onunla sadece İngilizce konuş. Yanıtların çok kısa, günlük hayattan ve anlaşılır olsun (en fazla 2-3 cümle). Eğer İngilizce gramer hatası yaparsa, çok nazikçe doğrusunu söyleyip sohbete devam et. Yanıtların sesli okunacak; bu yüzden madde işareti, yıldız, emoji veya başka biçimlendirme kullanma, yalnızca düz cümleler yaz. Sohbeti şu cümleyle sen başlattın: \"$_karsilama\"";
 
   // Ses çeşitliliği için listeler
   List<Map<dynamic, dynamic>> _ingilizceSesler = [];
@@ -925,17 +930,34 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
   void _yapayZekayiBaslat() {
     _mesajlar.add({"gonderen": "AI", "metin": _karsilama});
 
-    if (geminiApiKey.isEmpty) {
-      _mesajlar.add({"gonderen": "AI", "metin": "⚠️ Gemini API anahtarı tanımlı değil. Uygulamayı --dart-define=GEMINI_API_KEY=... ile derleyin."});
-      return;
+    if (claudeApiKey.isEmpty) {
+      _mesajlar.add({"gonderen": "AI", "metin": "⚠️ Claude API anahtarı tanımlı değil. Uygulamayı --dart-define=ANTHROPIC_API_KEY=... ile derleyin."});
     }
+  }
 
-    final model = GenerativeModel(
-      model: geminiModel,
-      apiKey: geminiApiKey,
-      systemInstruction: Content.system("Sen arkadaş canlısı ve cesaretlendirici bir İngilizce öğretmenisin. Karşındaki kişi A2 seviyesinde İngilizce pratik yapmak istiyor. Onunla sadece İngilizce konuş. Yanıtların çok kısa, günlük hayattan ve anlaşılır olsun (en fazla 2-3 cümle). Eğer İngilizce gramer hatası yaparsa, çok nazikçe doğrusunu söyleyip sohbete devam et."),
-    );
-    _chat = model.startChat();
+  // Claude Messages API'ye sohbet geçmişini gönderir, yanıtın ham gövdesini döndürür.
+  Future<http.Response> _claudeIstegi() {
+    return http.post(
+      Uri.parse('https://api.anthropic.com/v1/messages'),
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': claudeApiKey,
+        'anthropic-version': '2026-10-21',
+        // Model güvenlik nedeniyle yanıt vermezse istek sunucuda yedek modelle yeniden denenir.
+        'anthropic-beta': 'server-side-fallback-2026-07-01',
+        // Tarayıcıdan (web sürümü) doğrudan çağrı için gerekli.
+        if (kIsWeb) 'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: jsonEncode({
+        'model': claudeModel,
+        'max_tokens': 4096,
+        'system': _sistemTalimati,
+        // Kısa sohbet yanıtları için düşük efor yeterli ve daha hızlı.
+        'output_config': {'effort': 'low'},
+        'fallbacks': 'default',
+        'messages': _gecmis,
+      }),
+    ).timeout(const Duration(seconds: 60));
   }
 
   void _mesajEkle(String gonderen, String metin) {
@@ -1022,31 +1044,62 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
       _aiDusunuyor = true;
     });
 
+    if (claudeApiKey.isEmpty) {
+      _mesajEkle("AI", "⚠️ Claude API anahtarı tanımlı değil.");
+      setState(() => _aiDusunuyor = false);
+      return;
+    }
+
+    _gecmis.add({'role': 'user', 'content': mesaj.trim()});
+    bool basarili = false;
     try {
-      final chat = _chat;
-      if (chat == null) {
-        _mesajEkle("AI", "⚠️ Gemini API anahtarı tanımlı değil.");
+      final response = await _claudeIstegi();
+      final dynamic govde = jsonDecode(utf8.decode(response.bodyBytes));
+
+      if (response.statusCode != 200) {
+        final String apiMesaji = (govde is Map && govde['error'] is Map) ? (govde['error']['message'] ?? '').toString() : '';
+        debugPrint("Claude API hatası ${response.statusCode}: $apiMesaji");
+        String aciklama;
+        switch (response.statusCode) {
+          case 401: aciklama = "API key is invalid"; break;
+          case 403: aciklama = "API key is not allowed to use this model"; break;
+          case 404: aciklama = "Model '$claudeModel' is not available"; break;
+          case 429: aciklama = "Too many requests, try again in a moment"; break;
+          case 529: aciklama = "The AI service is busy, try again in a moment"; break;
+          default: aciklama = apiMesaji.isNotEmpty ? apiMesaji : "Server error (${response.statusCode})";
+        }
+        _mesajEkle("AI", "Error: $aciklama.");
         return;
       }
-      final response = await chat.sendMessage(Content.text(mesaj.trim())).timeout(const Duration(seconds: 30));
-      final cevap = response.text?.trim();
-      final aiCevabi = (cevap == null || cevap.isEmpty) ? "I'm listening, but I couldn't form a sentence." : cevap;
 
-      _mesajEkle("AI", aiCevabi);
-      if (mounted) _sesliOku(aiCevabi);
+      final List<dynamic> icerik = (govde is Map && govde['content'] is List) ? govde['content'] as List<dynamic> : const [];
+      final String cevap = icerik
+          .where((b) => b is Map && b['type'] == 'text')
+          .map((b) => (b['text'] ?? '').toString())
+          .join(' ')
+          .trim();
+
+      if (govde is Map && govde['stop_reason'] == 'refusal') {
+        _mesajEkle("AI", "Sorry, I can't answer that. Let's talk about something else.");
+        return;
+      }
+      if (cevap.isEmpty) {
+        _mesajEkle("AI", "I'm listening, but I couldn't form a sentence.");
+        return;
+      }
+
+      _gecmis.add({'role': 'assistant', 'content': icerik});
+      basarili = true;
+      _mesajEkle("AI", cevap);
+      if (mounted) _sesliOku(cevap);
+    } on TimeoutException {
+      _mesajEkle("AI", "Error: The answer took too long. Please try again.");
     } catch (e) {
       debugPrint("AI Hatası: $e");
-      final hata = e.toString();
-      String aciklama = "Connection problem. Please check your internet";
-      if (e is InvalidApiKey || hata.contains('API key') || hata.contains('403') || hata.contains('PERMISSION_DENIED')) {
-        aciklama = "API key is invalid or not allowed";
-      } else if (hata.contains('not found') || hata.contains('404')) {
-        aciklama = "Model '$geminiModel' is not available";
-      } else if (hata.contains('quota') || hata.contains('429')) {
-        aciklama = "Daily limit reached, try again later";
-      }
-      _mesajEkle("AI", "Error: $aciklama.");
+      _mesajEkle("AI", "Error: Connection problem. Please check your internet.");
     } finally {
+      // Yanıt alınamadıysa kullanıcı mesajını geçmişten çıkar; yoksa sıra (user/assistant) bozulur.
+      if (!basarili && _gecmis.isNotEmpty && _gecmis.last['role'] == 'user') _gecmis.removeLast();
       if (mounted) setState(() => _aiDusunuyor = false);
     }
   }

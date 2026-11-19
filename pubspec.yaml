@@ -42,7 +42,6 @@ dependencies:
   firebase_core: ^4.4.0
   firebase_remote_config: ^6.1.4
   url_launcher: ^6.3.2
-  google_generative_ai: ^0.4.7
   speech_to_text: ^7.3.0
   shared_preferences: ^2.3.0
 
@@ -103,4 +102,4 @@ flutter_icons:
   android: true
   ios: true
   image_path: "assets/icon.png"
-  min_sdk_android: 21 # Bu satır önemli, eski sürümlerde hata vermesini engeller
+  min_sdk_android: 21 # Bu satır önemli, eski sürümlerde hata vermesini engeller
