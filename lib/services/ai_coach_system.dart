@@ -10,8 +10,6 @@ import '../core/seviye.dart';
 
 /// "Nova": bulunulan ekrana göre kısa, motive edici tavsiye veren yapay zekâ koçu.
 class AiCoachSystem {
-  static const String _novaResmi = "https://cdn-icons-png.flaticon.com/512/4712/4712027.png";
-
   /// Ekran adına göre Nova'ya verilen durum açıklaması.
   static String _ekranBaglami(String ekran, Map<String, dynamic> veri) {
     switch (ekran) {
@@ -86,15 +84,6 @@ KURALLAR:
     }
   }
 
-  static Widget _novaYuzu() {
-    return Image.network(
-      _novaResmi,
-      fit: BoxFit.cover,
-      // İnternet yokken kırık resim yerine simge gösterilir.
-      errorBuilder: (context, error, stackTrace) => const Icon(Icons.auto_awesome, color: Colors.cyanAccent),
-    );
-  }
-
   static void showCoachDialog(BuildContext context, String screenName, {dynamic data}) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
@@ -132,7 +121,8 @@ KURALLAR:
                   border: Border.all(color: Colors.cyanAccent.shade400, width: 3),
                   boxShadow: [BoxShadow(color: Colors.cyanAccent.withValues(alpha: 0.5), blurRadius: 30)]
                 ),
-                child: ClipOval(child: _novaYuzu()),
+                // Nova'nın yüzü uygulamanın içinde çizilir; internetten resim indirilmez.
+                child: const Center(child: NovaOrbWidget(size: 56)),
               ),
               const SizedBox(height: 20),
               
@@ -203,11 +193,8 @@ KURALLAR:
         heroTag: "NovaFab_$screenName",
         onPressed: () => showCoachDialog(context, screenName, data: data),
         backgroundColor: Theme.of(context).cardColor,
-        child: Container(
-          width: 60, height: 60,
-          decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.8), width: 2), boxShadow: [BoxShadow(color: Colors.cyanAccent.withValues(alpha: 0.4), blurRadius: 15)]),
-          child: ClipOval(child: _novaYuzu()),
-        ),
+        shape: const CircleBorder(),
+        child: const NovaOrbWidget(size: 30),
       ),
     );
   }
@@ -226,6 +213,8 @@ class _TypingTextWidgetState extends State<_TypingTextWidget> {
   String _displayedText = "";
   late Timer _timer;
   int _currentIndex = 0;
+  // Karakterler (rune) tek tek yazılır; emoji gibi çift kod birimli harfler bölünmez.
+  late final List<int> _harfler = widget.text.runes.toList();
 
   @override
   void initState() {
@@ -239,9 +228,9 @@ class _TypingTextWidgetState extends State<_TypingTextWidget> {
         timer.cancel();
         return;
       }
-      if (_currentIndex < widget.text.length) {
+      if (_currentIndex < _harfler.length) {
         setState(() {
-          _displayedText += widget.text[_currentIndex];
+          _displayedText += String.fromCharCode(_harfler[_currentIndex]);
           _currentIndex++;
         });
       } else {

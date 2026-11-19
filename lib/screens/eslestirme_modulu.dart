@@ -177,6 +177,8 @@ class _EslestirmeModuluState extends State<EslestirmeModulu> with TickerProvider
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      // Koç düğmesi sağ altta durur (Stack içindeyken sol üstte geri düğmesini kapatıyordu).
+      floatingActionButton: AiCoachSystem.globalCoachButton(context, "Eşleştirme"),
       body: Stack(
         children: [
           SafeArea(
@@ -266,9 +268,6 @@ class _EslestirmeModuluState extends State<EslestirmeModulu> with TickerProvider
               ],
             ),
           ),
-
-          // Yapay Zeka Koçu (Sağ Alt)
-          AiCoachSystem.globalCoachButton(context, "Eşleştirme"),
         ],
       ),
     );

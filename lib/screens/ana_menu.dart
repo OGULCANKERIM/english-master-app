@@ -119,7 +119,7 @@ class _AnaMenuEkraniState extends State<AnaMenuEkrani> {
               children: [
                 // 1. HEADER
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 20),
+                  padding: const EdgeInsets.fromLTRB(25, 20, 25, 8),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -131,8 +131,6 @@ class _AnaMenuEkraniState extends State<AnaMenuEkrani> {
                             "ENGLISH MASTER",
                             style: GoogleFonts.poppins(color: theme.colorScheme.secondary, fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 2.5)
                           ),
-                          const SizedBox(height: 5),
-                          _KarsilamaYazisi(stil: GoogleFonts.playfairDisplay(color: theme.textTheme.bodyLarge!.color, fontSize: 28, fontWeight: FontWeight.bold)),
                         ],
                        ),
                       ),
@@ -196,7 +194,11 @@ class _AnaMenuEkraniState extends State<AnaMenuEkrani> {
                   ),
                 ),
 
-                const SizedBox(height: 5),
+                // Karşılama kendi satırında: düğmeler adı sıkıştırmasın.
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(25, 0, 25, 8),
+                  child: _KarsilamaYazisi(stil: GoogleFonts.playfairDisplay(color: theme.textTheme.bodyLarge!.color, fontSize: 28, fontWeight: FontWeight.bold)),
+                ),
 
                 // 2. BENTO BOX STAGGERED GRID
                 Expanded(
@@ -453,13 +455,18 @@ class _AnaMenuEkraniState extends State<AnaMenuEkrani> {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          title,
-                          style: GoogleFonts.playfairDisplay(
-                            color: Colors.white,
-                            fontSize: isPrimary ? 28 : 22,
-                            fontWeight: FontWeight.bold,
-                            height: 1.1,
+                        // Dar ekranlarda başlık kelime ortasından bölünmesin; sığmazsa küçülür.
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            title,
+                            style: GoogleFonts.playfairDisplay(
+                              color: Colors.white,
+                              fontSize: isPrimary ? 28 : 22,
+                              fontWeight: FontWeight.bold,
+                              height: 1.1,
+                            ),
                           ),
                         ),
                         const SizedBox(height: 8),
