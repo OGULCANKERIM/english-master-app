@@ -1,0 +1,34 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Kullanıcı profilleri: users/{uid}
+    match /users/{uid} {
+      // Okuma: giriş yapmış kullanıcı kendi belgesini, eğitmen belgelerini ve
+      // kendisini eğitmen olarak seçmiş öğrencilerin belgelerini okuyabilir.
+      // Uygulamadaki sorgular bununla eşleşir:
+      //   eğitmen listesi -> where('rol', '==', 'egitmen')
+      //   öğrencilerim    -> where('egitmenId', '==', kendi uid'si)
+      allow read: if request.auth != null && (
+        request.auth.uid == uid ||
+        resource.data.rol == 'egitmen' ||
+        resource.data.egitmenId == request.auth.uid
+      );
+
+      // Oluşturma: yalnızca kendi belgesi ve yalnızca öğrenci rolüyle.
+      allow create: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.rol == 'ogrenci';
+
+      // Güncelleme: yalnızca kendi belgesi ve rol değişmeden.
+      // Rol yalnızca Firebase konsolundan değiştirilir.
+      allow update: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.rol == resource.data.rol;
+
+      // Silme: yok.
+      allow delete: if false;
+    }
+  }
+}

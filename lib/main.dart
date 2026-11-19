@@ -11,6 +11,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'hesap/egitmen_ekranlari.dart';
+import 'hesap/profil_ekrani.dart';
 
 // --- YENİ EKLENEN YAPAY ZEKA VE SES PAKETLERİ ---
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -196,6 +198,19 @@ class AnaMenuEkrani extends StatelessWidget {
                         ikon: Icons.mic_rounded,
                         renk: Colors.greenAccent,
                         onTap: () => Navigator.push(context, _kayarakGecis(const KonusmaPratigiEkrani())),
+                      ),
+                      // Hesap gerektirir: giriş yapılmamışsa bu ekranlar giriş ekranını gösterir.
+                      _menuKarti(
+                        baslik: "My\nTutor",
+                        ikon: Icons.school_rounded,
+                        renk: Colors.amberAccent,
+                        onTap: () => Navigator.push(context, _kayarakGecis(const EgitmenimEkrani())),
+                      ),
+                      _menuKarti(
+                        baslik: "My\nProfile",
+                        ikon: Icons.person_rounded,
+                        renk: Colors.cyanAccent,
+                        onTap: () => Navigator.push(context, _kayarakGecis(const ProfilEkrani())),
                       ),
                     ],
                   ),

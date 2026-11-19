@@ -44,6 +44,8 @@ dependencies:
   url_launcher: ^6.3.2
   speech_to_text: ^7.3.0
   shared_preferences: ^2.3.0
+  firebase_auth: ^6.7.1
+  cloud_firestore: ^6.10.2
 
 dev_dependencies:
   flutter_test:
