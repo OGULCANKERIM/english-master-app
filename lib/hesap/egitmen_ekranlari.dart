@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 
 import 'giris_ekrani.dart';
 import 'hesap_servisi.dart';
+import 'mesaj_servisi.dart';
 import 'profil_ekrani.dart';
+import 'sohbet_ekrani.dart';
 
 // ==========================================
 // "MY TUTOR" GİRİŞİ (role göre yönlendirir)
@@ -398,9 +400,14 @@ class _SeciliEgitmenEkraniState extends State<_SeciliEgitmenEkrani> {
     // Başarılıysa profil akışı güncellenir ve bu ekran yerini listeye bırakır.
   }
 
-  List<Widget> _dugmeler({required String degistirEtiketi}) {
+  List<Widget> _dugmeler({required String degistirEtiketi, bool ikincil = false}) {
     return [
-      HesapDugmesi(etiket: degistirEtiketi, ikon: Icons.swap_horiz_rounded, onPressed: _degistir),
+      HesapDugmesi(
+        etiket: degistirEtiketi,
+        ikon: Icons.swap_horiz_rounded,
+        ikincil: ikincil,
+        onPressed: _degistir,
+      ),
       const SizedBox(height: 12),
       HesapDugmesi(
         etiket: 'Eğitmeni bırak',
@@ -440,11 +447,63 @@ class _SeciliEgitmenEkraniState extends State<_SeciliEgitmenEkrani> {
             children: [
               _EgitmenDetayi(egitmen: egitmen),
               const SizedBox(height: 20),
-              ..._dugmeler(degistirEtiketi: 'Eğitmeni değiştir'),
+              _MesajDugmesi(egitmen: egitmen),
+              const SizedBox(height: 12),
+              ..._dugmeler(degistirEtiketi: 'Eğitmeni değiştir', ikincil: true),
             ],
           );
         },
       ),
+    );
+  }
+}
+
+/// Öğrencinin eğitmenine yazdığı sohbeti açar; okunmamış mesaj sayısını gösterir.
+class _MesajDugmesi extends StatefulWidget {
+  const _MesajDugmesi({required this.egitmen});
+
+  final Kullanici egitmen;
+
+  @override
+  State<_MesajDugmesi> createState() => _MesajDugmesiState();
+}
+
+class _MesajDugmesiState extends State<_MesajDugmesi> {
+  late final String? _ben = HesapServisi.uid;
+  late final Stream<Sohbet?> _sohbet = _akis();
+
+  Stream<Sohbet?> _akis() {
+    final ben = _ben;
+    if (ben == null) return Stream<Sohbet?>.value(null);
+    try {
+      return MesajServisi.sohbetiIzle(ben, widget.egitmen.uid);
+    } catch (_) {
+      return Stream<Sohbet?>.value(null);
+    }
+  }
+
+  void _ac() {
+    final ben = _ben;
+    if (ben == null) return;
+    unawaited(
+      Navigator.of(context).push<void>(
+        _sayfa(SohbetEkrani(ogrenciId: ben, egitmenId: widget.egitmen.uid, karsiAd: widget.egitmen.gorunenAd)),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<Sohbet?>(
+      stream: _sohbet,
+      builder: (context, anlik) {
+        final yeni = anlik.data?.okunmamis(_ben) ?? 0;
+        return HesapDugmesi(
+          etiket: yeni > 0 ? 'Mesaj yaz · $yeni yeni' : 'Mesaj yaz',
+          ikon: yeni > 0 ? Icons.mark_chat_unread_rounded : Icons.chat_rounded,
+          onPressed: _ac,
+        );
+      },
     );
   }
 }
@@ -457,6 +516,28 @@ class EgitmenPaneliEkrani extends StatelessWidget {
   const EgitmenPaneliEkrani({super.key, required this.egitmen});
 
   final Kullanici egitmen;
+
+  Widget _ogrenciListesi(BuildContext context, List<Kullanici> ogrenciler, Map<String, int> yeniMesajlar) {
+    return Column(
+      children: [
+        for (final ogrenci in ogrenciler)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: _OgrenciKarti(
+              ogrenci: ogrenci,
+              yeniMesaj: yeniMesajlar[ogrenci.uid] ?? 0,
+              onTap: () => unawaited(
+                Navigator.of(context).push<void>(
+                  _sayfa(
+                    SohbetEkrani(ogrenciId: ogrenci.uid, egitmenId: egitmen.uid, karsiAd: ogrenci.gorunenAd),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -512,11 +593,16 @@ class EgitmenPaneliEkrani extends StatelessWidget {
                     mesaj: 'Henüz seni seçen öğrenci yok.\nÖğrenciler seni seçtiğinde burada görünür.',
                   )
                 else
-                  for (final ogrenci in ogrenciler)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: _OgrenciKarti(ogrenci: ogrenci),
+                  _Akis<List<Sohbet>>(
+                    olustur: MesajServisi.egitmenSohbetleriniIzle,
+                    // Sohbetler okunamazsa liste yine görünür, yalnızca sayaçlar eksik kalır.
+                    hata: (context, mesaj, tekrarDene) => _ogrenciListesi(context, ogrenciler, const {}),
+                    veri: (context, sohbetler) => _ogrenciListesi(
+                      context,
+                      ogrenciler,
+                      MesajServisi.egitmenOkunmamisi(ogrenciler, sohbetler),
                     ),
+                  ),
               ],
             ),
           ),
@@ -527,15 +613,32 @@ class EgitmenPaneliEkrani extends StatelessWidget {
 }
 
 class _OgrenciKarti extends StatelessWidget {
-  const _OgrenciKarti({required this.ogrenci});
+  const _OgrenciKarti({required this.ogrenci, required this.yeniMesaj, required this.onTap});
 
   final Kullanici ogrenci;
+  final int yeniMesaj;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(15),
-      decoration: hesapKartDekoru(),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Ink(
+          padding: const EdgeInsets.all(15),
+          decoration: hesapKartDekoru(),
+          child: _icerik(),
+        ),
+      ),
+    );
+  }
+
+  Widget _icerik() {
+    return Semantics(
+      button: true,
+      label: '${ogrenci.gorunenAd} ile mesajlaş',
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -552,8 +655,20 @@ class _OgrenciKarti extends StatelessWidget {
                     padding: const EdgeInsets.only(top: 4),
                     child: Text('Hedef: ${ogrenci.hedef}', style: hesapYazi(boyut: 13, renk: Colors.white70)),
                   ),
+                if (yeniMesaj > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      '$yeniMesaj yeni mesaj',
+                      style: hesapYazi(boyut: 13, renk: Colors.redAccent, kalinlik: FontWeight.w600),
+                    ),
+                  ),
               ],
             ),
+          ),
+          Icon(
+            yeniMesaj > 0 ? Icons.mark_chat_unread_rounded : Icons.chat_rounded,
+            color: yeniMesaj > 0 ? Colors.redAccent : Colors.white54,
           ),
         ],
       ),

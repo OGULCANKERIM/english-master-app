@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'hesap/egitmen_ekranlari.dart';
 import 'hesap/profil_ekrani.dart';
+import 'hesap/sohbet_ekrani.dart';
 
 // --- YENİ EKLENEN YAPAY ZEKA VE SES PAKETLERİ ---
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -200,11 +201,19 @@ class AnaMenuEkrani extends StatelessWidget {
                         onTap: () => Navigator.push(context, _kayarakGecis(const KonusmaPratigiEkrani())),
                       ),
                       // Hesap gerektirir: giriş yapılmamışsa bu ekranlar giriş ekranını gösterir.
-                      _menuKarti(
-                        baslik: "My\nTutor",
-                        ikon: Icons.school_rounded,
-                        renk: Colors.amberAccent,
-                        onTap: () => Navigator.push(context, _kayarakGecis(const EgitmenimEkrani())),
+                      Stack(
+                        children: [
+                          Positioned.fill(
+                            child: _menuKarti(
+                              baslik: "My\nTutor",
+                              ikon: Icons.school_rounded,
+                              renk: Colors.amberAccent,
+                              onTap: () => Navigator.push(context, _kayarakGecis(const EgitmenimEkrani())),
+                            ),
+                          ),
+                          // Okunmamış mesaj varsa kırmızı nokta.
+                          const Positioned(top: 16, right: 16, child: OkunmamisNoktasi()),
+                        ],
                       ),
                       _menuKarti(
                         baslik: "My\nProfile",

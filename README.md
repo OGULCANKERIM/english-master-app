@@ -17,6 +17,9 @@ Kelime listesi, quiz, reels, favoriler ve konuşma pratiği girişsiz kullanıl�
   zaman değiştirir veya bırakır.
 - **Eğitmen:** tanıtım yazısı, uzmanlık alanları, konuştuğu diller ve müsait günlerini girer;
   panelinde kendisini seçen öğrencileri görür.
+- **Mesajlaşma:** öğrenci seçtiği eğitmenle, eğitmen de her öğrencisiyle birebir yazışır (yalnızca
+  metin). Okunmamış mesaj ana menüde "My Tutor" kartında kırmızı noktayla görünür. Uygulama
+  kapalıyken telefona bildirim gelmez. Öğrenci eğitmeni bırakırsa sohbet kapanır.
 - Herkes öğrenci olarak kayıt olur. Kimin eğitmen olacağına uygulama sahibi karar verir (4. adım).
 
 Kod `lib/hesap/` altındadır; güvenlik kuralları `firestore.rules` dosyasındadır.

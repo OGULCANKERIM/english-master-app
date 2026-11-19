@@ -3,6 +3,10 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function girisli() {
+      return request.auth != null;
+    }
+
     // Kullanıcı profilleri: users/{uid}
     match /users/{uid} {
       // Okuma: giriş yapmış kullanıcı kendi belgesini, eğitmen belgelerini ve
@@ -10,25 +14,84 @@ service cloud.firestore {
       // Uygulamadaki sorgular bununla eşleşir:
       //   eğitmen listesi -> where('rol', '==', 'egitmen')
       //   öğrencilerim    -> where('egitmenId', '==', kendi uid'si)
-      allow read: if request.auth != null && (
+      allow read: if girisli() && (
         request.auth.uid == uid ||
         resource.data.rol == 'egitmen' ||
         resource.data.egitmenId == request.auth.uid
       );
 
       // Oluşturma: yalnızca kendi belgesi ve yalnızca öğrenci rolüyle.
-      allow create: if request.auth != null
+      allow create: if girisli()
         && request.auth.uid == uid
         && request.resource.data.rol == 'ogrenci';
 
       // Güncelleme: yalnızca kendi belgesi ve rol değişmeden.
       // Rol yalnızca Firebase konsolundan değiştirilir.
-      allow update: if request.auth != null
+      allow update: if girisli()
         && request.auth.uid == uid
         && request.resource.data.rol == resource.data.rol;
 
       // Silme: yok.
       allow delete: if false;
+    }
+
+    // Sohbet hâlâ açık mı: öğrencinin seçili eğitmeni bu eğitmen olmalı.
+    // Öğrenci eğitmeni bırakır veya değiştirirse sohbete artık yazılamaz.
+    function aktif(ogrenciId, egitmenId) {
+      return get(/databases/$(database)/documents/users/$(ogrenciId)).data.egitmenId == egitmenId;
+    }
+
+    // Birebir sohbetler: sohbetler/{ogrenciId}_{egitmenId}
+    match /sohbetler/{sohbetId} {
+      function parcalar() {
+        return sohbetId.split('_');
+      }
+
+      // Belge kimliğindeki iki kişiden biri olmak (belge henüz yokken de çalışır).
+      function taraf() {
+        return girisli()
+          && parcalar().size() == 2
+          && (request.auth.uid == parcalar()[0] || request.auth.uid == parcalar()[1]);
+      }
+
+      function gecerliSohbet() {
+        let veri = request.resource.data;
+        return veri.ogrenciId == parcalar()[0]
+          && veri.egitmenId == parcalar()[1]
+          && veri.keys().hasOnly([
+            'ogrenciId', 'egitmenId', 'sonMesaj', 'sonGonderen', 'sonZaman',
+            'okunmamisOgrenci', 'okunmamisEgitmen'
+          ])
+          && aktif(parcalar()[0], parcalar()[1]);
+      }
+
+      // Öğrenci kendi sohbetini kimliğiyle okur.
+      allow get: if taraf();
+
+      // Eğitmen sohbetlerini listeler: where('egitmenId', '==', kendi uid'si)
+      allow list: if girisli() && (
+        resource.data.egitmenId == request.auth.uid ||
+        resource.data.ogrenciId == request.auth.uid
+      );
+
+      allow create, update: if taraf() && gecerliSohbet();
+      allow delete: if false;
+
+      // Mesajlar: yalnızca iki taraf okur; yalnızca kendi adına, sohbet açıkken yazar.
+      match /mesajlar/{mesajId} {
+        allow read: if taraf();
+
+        allow create: if taraf()
+          && request.resource.data.keys().hasOnly(['gonderen', 'metin', 'zaman'])
+          && request.resource.data.gonderen == request.auth.uid
+          && request.resource.data.metin is string
+          && request.resource.data.metin.size() >= 1
+          && request.resource.data.metin.size() <= 1000
+          && request.resource.data.zaman == request.time
+          && aktif(parcalar()[0], parcalar()[1]);
+
+        allow update, delete: if false;
+      }
     }
   }
 }
