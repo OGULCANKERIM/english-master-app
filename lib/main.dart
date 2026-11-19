@@ -21,7 +21,9 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 // API anahtarı ASLA koda yazılmaz. Derlerken şu şekilde verilir:
 //   flutter run --dart-define=ANTHROPIC_API_KEY=xxxx
 const String claudeApiKey = String.fromEnvironment('ANTHROPIC_API_KEY');
-const String claudeModel = String.fromEnvironment('CLAUDE_MODEL', defaultValue: 'claude-opus-5-5');
+const String claudeModel = String.fromEnvironment('CLAUDE_MODEL', defaultValue: 'claude-haiku-5-5');
+// Haiku sunucu tarafı yedek modeli (fallbacks) desteklemez; diğer modellerde açılır.
+const bool claudeYedekDestekli = !bool.fromEnvironment('CLAUDE_YEDEK_KAPALI') && claudeModel != 'claude-haiku-5-5';
 
 // pubspec.yaml içindeki "version" ile aynı tutulmalı (güncelleme kontrolü bunu kullanır).
 const String uygulamaSurumu = "1.0.0";
@@ -944,7 +946,7 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
         'x-api-key': claudeApiKey,
         'anthropic-version': '2026-10-21',
         // Model güvenlik nedeniyle yanıt vermezse istek sunucuda yedek modelle yeniden denenir.
-        'anthropic-beta': 'server-side-fallback-2026-07-01',
+        if (claudeYedekDestekli) 'anthropic-beta': 'server-side-fallback-2026-07-01',
         // Tarayıcıdan (web sürümü) doğrudan çağrı için gerekli.
         if (kIsWeb) 'anthropic-dangerous-direct-browser-access': 'true',
       },
@@ -954,7 +956,7 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
         'system': _sistemTalimati,
         // Kısa sohbet yanıtları için düşük efor yeterli ve daha hızlı.
         'output_config': {'effort': 'low'},
-        'fallbacks': 'default',
+        if (claudeYedekDestekli) 'fallbacks': 'default',
         'messages': _gecmis,
       }),
     ).timeout(const Duration(seconds: 60));

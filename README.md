@@ -16,7 +16,7 @@ flutter pub get
 flutter run --dart-define=ANTHROPIC_API_KEY=ANAHTARINIZ
 ```
 
-İsteğe bağlı: `--dart-define=CLAUDE_MODEL=claude-haiku-5-5` ile model değiştirilebilir (varsayılan `claude-opus-5-5`).
+İsteğe bağlı: `--dart-define=CLAUDE_MODEL=claude-opus-5-5` ile model değiştirilebilir (varsayılan `claude-haiku-5-5`).
 
 ## Otomatik derleme (GitHub Actions)
 
