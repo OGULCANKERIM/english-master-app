@@ -29,9 +29,16 @@ jobs:
       - name: Paketleri ve Eklentileri Indir
         run: flutter pub get
 
+      - name: Kod Analizi ve Testler
+        # Hata varsa APK derlenmez ve testerlara bozuk surum gitmez.
+        run: |
+          flutter analyze
+          flutter test
+
       - name: Android APK Derle
-        # Claude anahtari kodda degil, GitHub > Settings > Secrets > ANTHROPIC_API_KEY icinde durur.
-        run: flutter build apk --release "--dart-define=ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}"
+        # Anahtarlar kodda degil, GitHub > Settings > Secrets icinde durur.
+        # PIXABAY_API_KEY istege baglidir; yoksa kelime kartlari resimsiz gosterilir.
+        run: flutter build apk --release "--dart-define=ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" "--dart-define=PIXABAY_API_KEY=${{ secrets.PIXABAY_API_KEY }}"
 
       - name: APK Dosyasini Cantaya Koy (Artifact)
         uses: actions/upload-artifact@v4

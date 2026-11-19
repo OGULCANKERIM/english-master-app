@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../core/seviye.dart';
 import 'giris_ekrani.dart';
 import 'hesap_servisi.dart';
 
@@ -95,6 +96,8 @@ class _ProfilFormuState extends State<_ProfilFormu> {
         );
       } else {
         await HesapServisi.ogrenciProfiliniGuncelle(ad: _ad.text, seviye: _seviye, hedef: _hedef.text);
+        // Konuşma, okuma ve koç aynı seviyeyi kullansın (çıkış yapıldığında da geçerli kalır).
+        await yerelSeviyeyiKaydet(_seviye);
       }
     } catch (hata) {
       mesaj = HesapServisi.hataMesaji(hata);
@@ -102,6 +105,11 @@ class _ProfilFormuState extends State<_ProfilFormu> {
     if (!mounted) return;
     setState(() => _kaydediliyor = false);
     hesapMesaji(context, mesaj);
+  }
+
+  Future<void> _sifreDegistir() async {
+    final String? sonuc = await showDialog<String>(context: context, builder: (_) => const _SifrePenceresi());
+    if (sonuc != null && mounted) hesapMesaji(context, sonuc);
   }
 
   Future<void> _cikisYap() async {
@@ -173,6 +181,13 @@ class _ProfilFormuState extends State<_ProfilFormu> {
             ),
           ),
           const SizedBox(height: 16),
+          HesapDugmesi(
+            etiket: 'Şifreyi değiştir',
+            ikon: Icons.lock_reset_rounded,
+            ikincil: true,
+            onPressed: () => unawaited(_sifreDegistir()),
+          ),
+          const SizedBox(height: 12),
           HesapDugmesi(
             etiket: 'Çıkış yap',
             ikon: Icons.logout_rounded,
@@ -298,6 +313,101 @@ class _RolRozeti extends StatelessWidget {
           Text(egitmen ? 'Eğitmen' : 'Öğrenci', style: hesapYazi(boyut: 12, renk: renk, kalinlik: FontWeight.w600)),
         ],
       ),
+    );
+  }
+}
+
+/// Eski ve yeni şifreyi sorar; başarılı olursa gösterilecek mesajla kapanır.
+class _SifrePenceresi extends StatefulWidget {
+  const _SifrePenceresi();
+
+  @override
+  State<_SifrePenceresi> createState() => _SifrePenceresiState();
+}
+
+class _SifrePenceresiState extends State<_SifrePenceresi> {
+  final _formAnahtari = GlobalKey<FormState>();
+  final _eski = TextEditingController();
+  final _yeni = TextEditingController();
+  bool _mesgul = false;
+  String? _hata;
+
+  @override
+  void dispose() {
+    _eski.dispose();
+    _yeni.dispose();
+    super.dispose();
+  }
+
+  Future<void> _gonder() async {
+    if (_mesgul) return;
+    if (!(_formAnahtari.currentState?.validate() ?? false)) return;
+    setState(() {
+      _mesgul = true;
+      _hata = null;
+    });
+    try {
+      await HesapServisi.sifreDegistir(eskiSifre: _eski.text, yeniSifre: _yeni.text);
+      if (mounted) Navigator.of(context).pop('Şifren değiştirildi.');
+    } catch (hata) {
+      if (!mounted) return;
+      setState(() {
+        _mesgul = false;
+        _hata = HesapServisi.hataMesaji(hata);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: const Color(0xFF302b63),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: Text('Şifreyi değiştir', style: hesapYazi(boyut: 18, kalinlik: FontWeight.w600)),
+      content: Form(
+        key: _formAnahtari,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: _eski,
+              obscureText: true,
+              style: hesapYazi(boyut: 15),
+              decoration: hesapAlanDekoru('Mevcut şifre', ikon: Icons.lock_outline_rounded),
+              validator: (deger) => (deger ?? '').isEmpty ? 'Mevcut şifreni yaz.' : null,
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _yeni,
+              obscureText: true,
+              style: hesapYazi(boyut: 15),
+              decoration: hesapAlanDekoru('Yeni şifre', ikon: Icons.lock_rounded, yardim: 'En az 6 karakter.'),
+              validator: (deger) {
+                final yeni = deger ?? '';
+                if (yeni.length < 6) return 'En az 6 karakter yaz.';
+                if (yeni == _eski.text) return 'Yeni şifre eskisinden farklı olmalı.';
+                return null;
+              },
+            ),
+            if (_hata != null) ...[
+              const SizedBox(height: 12),
+              Text(_hata!, style: hesapYazi(boyut: 13, renk: Colors.orangeAccent)),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _mesgul ? null : () => Navigator.of(context).pop(),
+          child: Text('Vazgeç', style: hesapYazi(renk: Colors.white70)),
+        ),
+        TextButton(
+          onPressed: _mesgul ? null : () => unawaited(_gonder()),
+          child: _mesgul
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : Text('Değiştir', style: hesapYazi(kalinlik: FontWeight.w600)),
+        ),
+      ],
     );
   }
 }

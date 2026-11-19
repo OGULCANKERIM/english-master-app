@@ -172,6 +172,18 @@ class HesapServisi {
     await _auth.sendPasswordResetEmail(email: eposta.trim());
   }
 
+  /// Şifreyi değiştirir. Firebase yakın zamanda giriş ister; bu yüzden önce
+  /// eski şifreyle kimlik doğrulanır.
+  static Future<void> sifreDegistir({required String eskiSifre, required String yeniSifre}) async {
+    _hazirOlmali();
+    final kullanici = _auth.currentUser;
+    final eposta = kullanici?.email;
+    if (kullanici == null || eposta == null) throw const HesapHatasi('Önce giriş yapmalısın.');
+    if (yeniSifre.length < 6) throw const HesapHatasi('Yeni şifre en az 6 karakter olmalı.');
+    await kullanici.reauthenticateWithCredential(EmailAuthProvider.credential(email: eposta, password: eskiSifre));
+    await kullanici.updatePassword(yeniSifre);
+  }
+
   static Future<void> cikisYap() async {
     _hazirOlmali();
     _bekleyenAd = null;
@@ -261,12 +273,20 @@ class HesapServisi {
 
   /// Kendi belgesini günceller. `rol` (ve `olusturma`) hiçbir koşulda gönderilmez;
   /// rol yalnızca Firebase konsolundan değişir.
-  static Future<void> _guncelle(Map<String, Object?> veri) {
+  static Future<void> _guncelle(Map<String, Object?> veri) async {
     final id = _gerekliUid();
     final temiz = Map<String, Object?>.of(veri)
       ..remove('rol')
       ..remove('olusturma');
-    return _users.doc(id).update(temiz).timeout(_yazmaSuresi);
+    await _users.doc(id).update(temiz).timeout(_yazmaSuresi);
+    final ad = temiz['ad'];
+    if (ad is String && ad.isNotEmpty) {
+      try {
+        await _auth.currentUser?.updateDisplayName(ad);
+      } catch (_) {
+        // Görünen ad yalnızca yedek; asıl ad Firestore belgesinde durur.
+      }
+    }
   }
 
   // ---------------------------------------------------------------- Diğer kullanıcılar
