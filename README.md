@@ -20,7 +20,8 @@ Kelime kartları, quiz, reels, favoriler, konuşma, okuma, eşleştirme ve ayarl
 - **Öğrenci:** ad, seviye (A1–C1) ve öğrenme hedefi girer; listeden bir eğitmen seçer, istediği
   zaman değiştirir veya bırakır.
 - **Eğitmen:** tanıtım yazısı, uzmanlık alanları, konuştuğu diller ve müsait günlerini girer;
-  panelinde kendisini seçen öğrencileri görür.
+  panelinde kendisini seçen öğrencileri görür. Ayrıca kendi öğrencilerini ekleyip her birine haftalık
+  bir speaking randevusu (gün ve saat) verebilir; bu liste yalnızca eğitmenin telefonunda saklanır.
 - **Mesajlaşma:** öğrenci seçtiği eğitmenle, eğitmen de her öğrencisiyle birebir yazışır (yalnızca
   metin). Okunmamış mesaj ana menüde "My Tutor" kartında kırmızı noktayla görünür. Uygulama
   kapalıyken telefona bildirim gelmez. Öğrenci eğitmeni bırakırsa sohbet kapanır.
