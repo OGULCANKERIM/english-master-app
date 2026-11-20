@@ -38,7 +38,8 @@ class ClaudeServisi {
   static final ClaudeServisi varsayilan = ClaudeServisi();
 
   static const String anahtarYokMesaji =
-      "⚠️ Claude API anahtarı tanımlı değil. Uygulamayı --dart-define=ANTHROPIC_API_KEY=... ile derleyin.";
+      "⚠️ Yapay zekâ bu sürümde bağlı değil: uygulama Claude anahtarı olmadan derlenmiş. "
+      "GitHub > Settings > Secrets and variables > Actions altına ANTHROPIC_API_KEY ekleyip yeniden derleyin.";
 
   final http.Client _istemci;
   final String anahtar;

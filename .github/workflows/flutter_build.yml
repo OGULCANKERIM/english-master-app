@@ -16,8 +16,8 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Claude Anahtarini ve Baglantisini Dene
-        # Anahtar eksik ya da gecersizse APK derlenmez: yapay zeka bolumleri calismayan
-        # bir surum testerlara gitmez. Sonuc, calismanin "Annotations" bolumunde gorunur.
+        # Anahtar gecersizse APK derlenmez; hic tanimli degilse uyari verilip devam edilir.
+        # Sonuc, calismanin "Annotations" bolumunde gorunur.
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python3 .github/claude_dene.py

@@ -58,9 +58,10 @@ def dene(ad, max_tokens, ek=None):
 
 
 if not ANAHTAR:
-    print("::error title=Claude anahtari yok::ANTHROPIC_API_KEY secret'i tanimli degil. "
-          "GitHub > Settings > Secrets and variables > Actions altina ekleyin.")
-    sys.exit(1)
+    # Anahtar yokken de APK derlenir (diger bolumler calisir) ama uyari verilir.
+    print("::warning title=Claude anahtari yok::ANTHROPIC_API_KEY secret'i tanimli degil; Reading, Nova ve "
+          "Voice Studio calismaz. GitHub > Settings > Secrets and variables > Actions altina ekleyin.")
+    sys.exit(0)
 
 sonuclar = [
     dene("kisa (max 400)", 400),

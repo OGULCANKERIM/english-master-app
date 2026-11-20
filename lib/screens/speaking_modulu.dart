@@ -1,5 +1,6 @@
 import 'dart:math';
 import 'dart:ui';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -7,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../core/claude_servisi.dart';
+import '../core/dikte.dart';
 import '../core/konusma_kaydi.dart';
 import '../core/seviye.dart';
 import '../services/ai_coach_system.dart';
@@ -26,7 +28,21 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
   bool _speechHazir = false;
   late FlutterTts _flutterTts;
   bool _isListening = false;
-  String _kullaniciMetni = "";
+  // Yazı kutusu: sesle söylenen de buraya yazılır, istenirse elle düzeltilip gönderilir.
+  final TextEditingController _yazi = TextEditingController();
+  final FocusNode _yaziOdak = FocusNode();
+  final DikteMetni _dikte = DikteMetni();
+  // Mikrofonun o anki ses düzeyi (0..1); dalga göstergesini besler.
+  final ValueNotifier<double> _sesDuzeyi = ValueNotifier<double>(0);
+  // Bir dinleme parçası sürüyor mu (aynı parçanın bitişi iki kez işlenmesin diye).
+  bool _parcaAcik = false;
+  // Durdurulduktan sonra gelen son sonucu kaçırmamak için kısa bekleme süresi.
+  bool _sonlandiriliyor = false;
+  // Konuşma bitince mesaj kendiliğinden gönderilsin mi (kapalıysa önce düzeltilebilir).
+  bool _otomatikGonder = true;
+  String? _yerelKimlik;
+  // Dinleme başlarken yazı kutusunda duran metin (yeni bir şey söylendi mi diye bakılır).
+  String _dinlemeOncesiMetin = '';
 
   final List<Map<String, String>> _mesajlar = [];
   bool _aiDusunuyor = false;
@@ -139,6 +155,7 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
 
       String? kayitliSes = prefs.getString('aiVoice');
       if (kayitliSes != null && _sesProfilleri.containsKey(kayitliSes)) _seciliSesProfili = kayitliSes;
+      _otomatikGonder = prefs.getBool('speakingAutoSend') ?? true;
       if (mounted) setState(() {});
 
       final String kayitliSeviye = await mevcutSeviye();
@@ -279,7 +296,7 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
     setState(() {
       _mesajlar.clear();
       _sohbetGecmisi.clear();
-      _kullaniciMetni = "";
+      _yazi.clear();
       _aiDusunuyor = false;
     });
 
@@ -302,7 +319,7 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
       if (_aiModlari.containsKey(kayit.mod)) _seciliAiModu = kayit.mod;
       if (_seviyeler.contains(kayit.seviye)) _seciliSeviye = kayit.seviye;
       _aiDusunuyor = false;
-      _kullaniciMetni = "";
+      _yazi.clear();
       _aktifSistem = kayit.sistem.isNotEmpty ? kayit.sistem : _sistemMetni();
       _mesajlar
         ..clear()
@@ -403,88 +420,190 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
     );
   }
 
-  // Mikrofona dokunma: dinlemiyorsa başlatır, dinliyorsa durdurup gönderir.
+  void _uyar(String mesaj) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(mesaj), duration: const Duration(seconds: 4)));
+  }
+
+  void _kutuyuGuncelle(String metin) {
+    _yazi.value = TextEditingValue(text: metin, selection: TextSelection.collapsed(offset: metin.length));
+  }
+
+  /// Konuşma tanımayı bir kez kurar; kurulamazsa false döner.
+  Future<bool> _konusmayiHazirla() async {
+    if (_speechHazir) return true;
+    _speechHazir = await _speechToText.initialize(
+      onStatus: (durum) {
+        // Telefon kısa bir sessizlikte parçayı kendiliğinden bitirir.
+        if (durum == 'done') _parcaBitti();
+      },
+      onError: (hata) {
+        debugPrint('Konuşma tanıma hatası: ${hata.errorMsg}');
+        if (sessizlikHatasiMi(hata.errorMsg)) {
+          _parcaBitti();
+          return;
+        }
+        final String? mesaj = konusmaHatasiMesaji(hata.errorMsg);
+        if (mesaj == null) return;
+        _dinlemeyiBitir(gonder: false, sessizUyari: true);
+        _uyar(mesaj);
+      },
+    );
+    if (_speechHazir) {
+      try {
+        _yerelKimlik = ingilizceYerelSec((await _speechToText.locales()).map((l) => l.localeId));
+      } catch (e) {
+        debugPrint("Konuşma dilleri okunamadı: $e");
+      }
+    }
+    return _speechHazir;
+  }
+
+  // Mikrofona dokunma: dinlemiyorsa başlatır, dinliyorsa bitirir.
   Future<void> _mikrofonuTetikle() async {
-    if (_aiDusunuyor) return;
+    if (_aiDusunuyor || _sonlandiriliyor) return;
     if (_isListening) {
       await _dinlemeyiBitir();
       return;
     }
 
     try {
-      // Motor yalnızca bir kez kurulur; her dokunuşta yeniden kurmak çift tetiklemeye yol açar.
-      if (!_speechHazir) {
-        _speechHazir = await _speechToText.initialize(
-          onStatus: (status) {
-            // Kullanıcı susarsa otomatik olarak gönder.
-            if (status == 'done' || status == 'notListening') _dinlemeyiBitir();
-          },
-          onError: (hata) {
-            debugPrint('Konuşma tanıma hatası: $hata');
-            if (mounted) setState(() => _isListening = false);
-          },
-        );
-      }
+      final bool hazir = await _konusmayiHazirla();
       if (!mounted) return;
-
-      if (!_speechHazir) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Mikrofon izni alınamadı veya konuşma tanıma desteklenmiyor.")));
+      if (!hazir) {
+        _uyar("Mikrofon izni alınamadı ya da telefonda konuşma tanıma yok. Yazarak da devam edebilirsin.");
         return;
       }
 
       // Öğretmen konuşurken dinlemeye başlarsak mikrofon öğretmenin sesini yazar.
       await _flutterTts.stop();
       if (!mounted) return;
-      setState(() {
-        _isListening = true;
-        _kullaniciMetni = "";
-      });
-      await _speechToText.listen(
-        onResult: (result) {
-          if (mounted && _isListening) setState(() { _kullaniciMetni = result.recognizedWords; });
-        },
-        localeId: "en_US",
-        pauseFor: const Duration(seconds: 4),
-        listenFor: const Duration(seconds: 60),
-      );
+      _yaziOdak.unfocus();
+      _dikte.basla(_yazi.text);
+      _dinlemeOncesiMetin = _yazi.text.trim();
+      setState(() => _isListening = true);
+      await _parcayiDinle();
     } catch (e) {
       debugPrint("Mikrofon başlatılamadı: $e");
-      if (mounted) {
-        setState(() => _isListening = false);
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Mikrofon başlatılamadı.")));
-      }
+      _isListening = false;
+      _parcaAcik = false;
+      if (mounted) setState(() {});
+      _uyar("Mikrofon başlatılamadı. Tekrar dene ya da yazarak devam et.");
     }
   }
 
-  // Hem "durdur" dokunuşu hem de motorun 'done' bildirimi buraya gelir;
-  // _isListening bayrağı sayesinde mesaj yalnızca BİR kez gönderilir.
-  Future<void> _dinlemeyiBitir() async {
+  /// Bir dinleme parçası başlatır. Kullanıcı durdurana ya da susana kadar parçalar art arda
+  /// eklenir; böylece cümle ortasında düşünmek için durmak sözü kesmez.
+  Future<void> _parcayiDinle() async {
+    _parcaAcik = true;
+    await _speechToText.listen(
+      onResult: (sonuc) {
+        if (!mounted || !(_isListening || _sonlandiriliyor)) return;
+        _dikte.parcaGuncelle(sonuc.recognizedWords);
+        _kutuyuGuncelle(_dikte.metin);
+      },
+      onSoundLevelChange: (duzey) => _sesDuzeyi.value = sesDuzeyiOrani(duzey),
+      localeId: _yerelKimlik,
+      pauseFor: const Duration(seconds: 3),
+      listenFor: const Duration(minutes: 2),
+      listenOptions: stt.SpeechListenOptions(
+        partialResults: true,
+        listenMode: stt.ListenMode.dictation,
+        cancelOnError: false,
+        autoPunctuation: true,
+      ),
+    );
+  }
+
+  /// Telefon bir parçayı bitirdiğinde çağrılır: söz varsa dinlemeye devam eder, yoksa bitirir.
+  Future<void> _parcaBitti() async {
+    if (!_isListening || !_parcaAcik) return;
+    _parcaAcik = false;
+    final bool sozVardi = _dikte.parcayiBitir();
+    if (!sozVardi) {
+      await _dinlemeyiBitir();
+      return;
+    }
+    // Biten parçanın gecikmeli bildirimleri yeni parçayla karışmasın diye kısa bir ara verilir.
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+    if (!mounted || !_isListening) return;
+    try {
+      await _parcayiDinle();
+    } catch (e) {
+      debugPrint("Dinleme sürdürülemedi: $e");
+      await _dinlemeyiBitir();
+    }
+  }
+
+  // Hem "durdur" dokunuşu hem de sessizlik buraya gelir; _isListening bayrağı sayesinde
+  // yalnızca BİR kez çalışır. [gonder] verilmezse "otomatik gönder" ayarı geçerlidir.
+  Future<void> _dinlemeyiBitir({bool? gonder, bool sessizUyari = false}) async {
     if (!_isListening) return;
+    final int buSohbet = _sohbetNo;
     _isListening = false;
-    final mesaj = _kullaniciMetni;
+    _parcaAcik = false;
+    _sonlandiriliyor = true;
+    _sesDuzeyi.value = 0;
     if (mounted) setState(() {});
     try { await _speechToText.stop(); } catch (e) { debugPrint("Dinleme durdurulamadı: $e"); }
-    await _yapayZekayaGonder(mesaj);
+    // Durdurulduktan hemen sonra gelen son sonucu da metne kat.
+    await Future<void>.delayed(const Duration(milliseconds: 350));
+    _sonlandiriliyor = false;
+    // Bu arada başka sohbete geçildiyse söylenen o sohbete yazılmaz.
+    if (!mounted || buSohbet != _sohbetNo) return;
+    _dikte.parcayiBitir();
+    _kutuyuGuncelle(_dikte.metin);
+    setState(() {});
+    // Hiçbir şey duyulmadıysa uyarılır; kutuda önceden yazılmış metin kendiliğinden gönderilmez.
+    if (_yazi.text.trim() == _dinlemeOncesiMetin) {
+      if (!sessizUyari) _uyar(konusmaHatasiMesaji('error_no_match')!);
+      return;
+    }
+    if (gonder ?? _otomatikGonder) await _yazilaniGonder();
   }
 
   // Dinlemeyi, söyleneni göndermeden keser (yeni sohbete geçerken).
   void _dinlemeyiIptalEt() {
     if (!_isListening) return;
     _isListening = false;
+    _parcaAcik = false;
+    _sesDuzeyi.value = 0;
     _speechToText.cancel().catchError((Object e) { debugPrint("Dinleme iptal edilemedi: $e"); });
   }
 
-  Future<void> _yapayZekayaGonder(String mesaj) async {
-    if (mesaj.trim().isEmpty || _aiDusunuyor || !mounted) {
-      if (mounted) setState(() => _kullaniciMetni = "");
-      return;
+  /// Yazı kutusundaki metni gönderir (elle yazılmış ya da sesle söylenmiş).
+  Future<void> _yazilaniGonder() async {
+    if (_isListening) {
+      // Dinlerken gönder'e basıldı: dinleme kapatılır, kutudaki metin aşağıda gönderilir.
+      await _dinlemeyiBitir(gonder: false, sessizUyari: true);
+      if (!mounted) return;
     }
+    final String metin = _yazi.text.trim();
+    if (metin.isEmpty || _aiDusunuyor) return;
+    _yazi.clear();
+    await _yapayZekayaGonder(metin);
+  }
+
+  Future<void> _otomatikGonderiDegistir() async {
+    setState(() => _otomatikGonder = !_otomatikGonder);
+    _uyar(_otomatikGonder
+        ? "Otomatik gönder açık: konuşman bitince mesaj kendiliğinden gider."
+        : "Otomatik gönder kapalı: söylediğin yazı kutusunda kalır, düzeltip gönderebilirsin.");
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('speakingAutoSend', _otomatikGonder);
+    } catch (e) {
+      debugPrint("Ayar kaydedilemedi: $e");
+    }
+  }
+
+  Future<void> _yapayZekayaGonder(String mesaj) async {
+    if (mesaj.trim().isEmpty || _aiDusunuyor || !mounted) return;
 
     _mesajEkle("Sen", mesaj.trim());
-    setState(() {
-      _kullaniciMetni = "";
-      _aiDusunuyor = true;
-    });
+    setState(() => _aiDusunuyor = true);
 
     // Yanıt gelene kadar kullanıcı başka sohbete geçerse (yeni konu, kayıtlı sohbet, ekrandan
     // çıkış) bu yanıt yok sayılır: o sohbetin ne balonlarına ne geçmişine ne de durumuna dokunulur.
@@ -529,6 +648,9 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
     _sohbetNo++;
     _speechToText.cancel();
     _flutterTts.stop();
+    _yazi.dispose();
+    _yaziOdak.dispose();
+    _sesDuzeyi.dispose();
     super.dispose();
   }
 
@@ -636,7 +758,8 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       drawer: _buildDrawer(theme, isDark),
-      floatingActionButton: AiCoachSystem.globalCoachButton(context, "SpeakingView"),
+      // Sohbet açıkken Nova düğmesi gönder düğmesinin üstüne binmesin diye gizlenir.
+      floatingActionButton: _konuSecimEkraninda ? AiCoachSystem.globalCoachButton(context, "SpeakingView") : null,
       body: _konuSecimEkraninda ? _buildVitrinEkrani(theme, isDark) : _buildSohbetEkrani(theme, isDark),
     );
   }
@@ -752,7 +875,7 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
         ),
         Expanded(
           child: ListView.builder(
-            padding: const EdgeInsets.only(left: 20, right: 20, top: 20, bottom: 100), itemCount: _mesajlar.length,
+            padding: const EdgeInsets.only(left: 20, right: 20, top: 20, bottom: 20), itemCount: _mesajlar.length,
             itemBuilder: (context, index) {
               final mesaj = _mesajlar[index];
               final isSen = mesaj["gonderen"] == "Sen";
@@ -787,52 +910,135 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
         ),
         if (_aiDusunuyor) Padding(padding: const EdgeInsets.all(8.0), child: CircularProgressIndicator(color: theme.primaryColor)),
 
-        // YÜZEN AKSİYON ÇUBUĞU (FLOATING PILL)
-        Padding(
-          padding: const EdgeInsets.only(left: 20, right: 20, bottom: 25),
+        _buildYaziCubugu(theme, isDark),
+      ],
+    );
+  }
+
+  // YAZI + SES ÇUBUĞU: söylenen yazı kutusuna düşer; kutuya elle de yazılabilir.
+  Widget _buildYaziCubugu(ThemeData theme, bool isDark) {
+    final Color yaziRengi = theme.textTheme.bodyLarge?.color ?? Colors.white;
+    final Color dinlemeRengi = isDark ? Colors.greenAccent : Colors.green.shade700;
+
+    Widget kucukDugme({required IconData ikon, required String ipucu, required VoidCallback onTap, Color? renk, bool dolu = false}) {
+      return Tooltip(
+        message: ipucu,
+        child: InkResponse(
+          onTap: onTap,
+          radius: 26,
           child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
-            decoration: BoxDecoration(
-              color: theme.cardColor.withValues(alpha: isDark ? 0.95 : 1.0),
-              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.5 : 0.1), blurRadius: 25, offset: const Offset(0, 10))],
-              borderRadius: BorderRadius.circular(40),
-              border: Border.all(color: Colors.white.withValues(alpha: isDark ? 0.05 : 0.5), width: 1)
-            ),
-            child: Column(
-              children: [
-                Text(_isListening ? "Listening... (Tap to stop)" : "Tap to speak!", style: GoogleFonts.poppins(color: _isListening ? (isDark ? Colors.greenAccent : Colors.green.shade700) : theme.textTheme.bodyLarge?.color?.withValues(alpha: 0.5), fontSize: 13, fontWeight: FontWeight.w600)),
-                if (_kullaniciMetni.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  Text(_kullaniciMetni, style: GoogleFonts.poppins(color: theme.textTheme.bodyLarge?.color?.withValues(alpha: 0.8), fontStyle: FontStyle.italic, fontSize: 15), textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis),
-                ],
-                const SizedBox(height: 15),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    GestureDetector(onTap: _yeniSohbetBaslat, child: Container(padding: const EdgeInsets.all(15), decoration: BoxDecoration(color: theme.textTheme.bodyLarge?.color?.withValues(alpha: 0.05), shape: BoxShape.circle), child: Icon(Icons.refresh_rounded, color: theme.textTheme.bodyLarge?.color?.withValues(alpha: 0.6), size: 24))),
-                    const SizedBox(width: 20),
-                    GestureDetector(
+            width: 44, height: 44,
+            decoration: BoxDecoration(color: (renk ?? yaziRengi).withValues(alpha: dolu ? 0.2 : 0.06), shape: BoxShape.circle),
+            child: Icon(ikon, color: renk ?? yaziRengi.withValues(alpha: 0.6), size: 22),
+          ),
+        ),
+      );
+    }
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.only(left: 14, right: 14, bottom: 12, top: 4),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+          decoration: BoxDecoration(
+            color: theme.cardColor.withValues(alpha: isDark ? 0.95 : 1.0),
+            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.5 : 0.1), blurRadius: 25, offset: const Offset(0, 10))],
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: _isListening ? dinlemeRengi.withValues(alpha: 0.7) : Colors.white.withValues(alpha: isDark ? 0.05 : 0.5), width: _isListening ? 1.5 : 1),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_isListening)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    children: [
+                      _SesDalgasi(duzey: _sesDuzeyi, renk: dinlemeRengi),
+                      const SizedBox(width: 10),
+                      Expanded(child: Text("Listening… take your time. Tap ■ when you finish.", style: GoogleFonts.poppins(color: dinlemeRengi, fontSize: 12, fontWeight: FontWeight.w600))),
+                    ],
+                  ),
+                ),
+              TextField(
+                controller: _yazi,
+                focusNode: _yaziOdak,
+                minLines: 1,
+                maxLines: 4,
+                textCapitalization: TextCapitalization.sentences,
+                textInputAction: TextInputAction.newline,
+                style: GoogleFonts.poppins(color: yaziRengi, fontSize: 15),
+                decoration: InputDecoration(
+                  isDense: true,
+                  border: InputBorder.none,
+                  hintText: _isListening ? "Speak now…" : "Tap the mic and speak, or type here",
+                  hintStyle: GoogleFonts.poppins(color: yaziRengi.withValues(alpha: 0.4), fontSize: 14),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  kucukDugme(ikon: Icons.refresh_rounded, ipucu: "Yeni sohbet", onTap: _yeniSohbetBaslat),
+                  const SizedBox(width: 8),
+                  _ipucuBekleniyor
+                      ? const SizedBox(width: 44, height: 44, child: Padding(padding: EdgeInsets.all(11), child: CircularProgressIndicator(color: Colors.amber, strokeWidth: 2)))
+                      : kucukDugme(ikon: Icons.lightbulb_rounded, ipucu: "Ne diyebilirim?", onTap: _ipucuIste, renk: Colors.amber, dolu: true),
+                  const SizedBox(width: 8),
+                  kucukDugme(
+                    ikon: _otomatikGonder ? Icons.bolt_rounded : Icons.edit_note_rounded,
+                    ipucu: _otomatikGonder ? "Otomatik gönder açık" : "Otomatik gönder kapalı",
+                    onTap: _otomatikGonderiDegistir,
+                    renk: _otomatikGonder ? theme.primaryColor : null,
+                    dolu: _otomatikGonder,
+                  ),
+                  const Spacer(),
+                  // Kutuda yazı varsa gönder düğmesi görünür.
+                  ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: _yazi,
+                    builder: (context, deger, _) {
+                      if (deger.text.trim().isEmpty || _aiDusunuyor) return const SizedBox.shrink();
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 10),
+                        child: Semantics(
+                          button: true,
+                          label: "Gönder",
+                          child: InkResponse(
+                            onTap: _yazilaniGonder,
+                            radius: 28,
+                            child: Container(
+                              width: 48, height: 48,
+                              decoration: BoxDecoration(color: theme.primaryColor.withValues(alpha: 0.18), shape: BoxShape.circle, border: Border.all(color: theme.primaryColor.withValues(alpha: 0.6))),
+                              child: Icon(Icons.send_rounded, color: theme.primaryColor, size: 22),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  Semantics(
+                    button: true,
+                    label: _isListening ? "Dinlemeyi bitir" : "Konuşmaya başla",
+                    child: GestureDetector(
                       onTap: _mikrofonuTetikle,
                       child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 300),
-                        padding: EdgeInsets.all(_isListening ? 25 : 20),
+                        duration: const Duration(milliseconds: 250),
+                        width: _isListening ? 64 : 58, height: _isListening ? 64 : 58,
                         decoration: BoxDecoration(
                           gradient: LinearGradient(colors: _isListening ? (isDark ? [Colors.greenAccent.shade400, Colors.tealAccent.shade400] : [Colors.green.shade500, Colors.teal.shade500]) : [theme.primaryColor, theme.primaryColor.withValues(alpha: 0.8)]),
                           shape: BoxShape.circle,
-                          boxShadow: [if (_isListening) BoxShadow(color: Colors.greenAccent.withValues(alpha: 0.6), blurRadius: 25, spreadRadius: 10) else BoxShadow(color: theme.primaryColor.withValues(alpha: 0.4), blurRadius: 15, offset: const Offset(0, 5))]
+                          boxShadow: [if (_isListening) BoxShadow(color: Colors.greenAccent.withValues(alpha: 0.5), blurRadius: 20, spreadRadius: 4) else BoxShadow(color: theme.primaryColor.withValues(alpha: 0.4), blurRadius: 12, offset: const Offset(0, 4))],
                         ),
-                        child: Icon(_isListening ? Icons.graphic_eq_rounded : Icons.mic_rounded, color: Colors.white, size: _isListening ? 35 : 30)
-                      )
+                        child: Icon(_isListening ? Icons.stop_rounded : Icons.mic_rounded, color: Colors.white, size: 30),
+                      ),
                     ),
-                    const SizedBox(width: 20),
-                    GestureDetector(onTap: _ipucuIste, child: Container(padding: const EdgeInsets.all(15), decoration: BoxDecoration(color: Colors.amber.withValues(alpha: 0.15), shape: BoxShape.circle), child: _ipucuBekleniyor ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.amber, strokeWidth: 2)) : const Icon(Icons.lightbulb_rounded, color: Colors.amber, size: 24))),
-                  ],
-                ),
-              ],
-            ),
+                  ),
+                ],
+              ),
+            ],
           ),
-        )
-      ],
+        ),
+      ),
     );
   }
 
@@ -845,6 +1051,39 @@ class _KonusmaPratigiEkraniState extends State<KonusmaPratigiEkrani> {
             Padding(padding: const EdgeInsets.all(20.0), child: ElevatedButton.icon(onPressed: () { Navigator.pop(context); setState(() => _konuSecimEkraninda = true); }, icon: const Icon(Icons.dashboard_customize_rounded, color: Colors.white), label: const Text("Topic Library", style: TextStyle(color: Colors.white, fontSize: 16)), style: ElevatedButton.styleFrom(backgroundColor: theme.primaryColor, minimumSize: const Size(double.infinity, 55), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))))),
             Divider(color: theme.dividerColor),
             Expanded(child: _kayitliSohbetler.isEmpty ? Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.history_rounded, color: theme.iconTheme.color?.withValues(alpha: 0.2), size: 60), const SizedBox(height: 10), Text("No past conversations", style: TextStyle(color: theme.textTheme.bodyLarge?.color?.withValues(alpha: 0.5)))])) : ListView.builder(itemCount: _kayitliSohbetler.length, itemBuilder: (context, index) { return ListTile(leading: Icon(Icons.chat_bubble_outline_rounded, color: theme.iconTheme.color?.withValues(alpha: 0.7)), title: Text(_kayitliSohbetler[index].konu.isNotEmpty ? _kayitliSohbetler[index].konu : "Saved Conversation ${index + 1}", maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: theme.textTheme.bodyLarge?.color, fontWeight: FontWeight.w600)), subtitle: Text("${_kayitliSohbetler[index].mesajlar.length} messages", style: TextStyle(color: theme.textTheme.bodyLarge?.color?.withValues(alpha: 0.5), fontSize: 12)), trailing: IconButton(icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20), onPressed: () => _sohbetiSil(index)), onTap: () => _eskiSohbetiYukle(index)); })),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Mikrofonun duyduğu sese göre oynayan küçük dalga göstergesi.
+class _SesDalgasi extends StatelessWidget {
+  const _SesDalgasi({required this.duzey, required this.renk});
+
+  final ValueListenable<double> duzey;
+  final Color renk;
+
+  static const List<double> _agirliklar = [0.5, 0.85, 1.0, 0.7, 0.45];
+
+  @override
+  Widget build(BuildContext context) {
+    return ExcludeSemantics(
+      child: ValueListenableBuilder<double>(
+        valueListenable: duzey,
+        builder: (context, deger, _) => Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            for (final agirlik in _agirliklar)
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 120),
+                margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                width: 4,
+                height: 5 + 17 * deger * agirlik,
+                decoration: BoxDecoration(color: renk, borderRadius: BorderRadius.circular(3)),
+              ),
           ],
         ),
       ),

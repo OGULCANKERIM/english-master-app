@@ -1,14 +1,87 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_player/video_player.dart';
 import '../core/globals.dart';
+import '../core/video_onbellek.dart';
+
+/// Bir reels videosunun ekranda görünen adı. Tabloda (ya da favoride) `baslik` gibi bir ad
+/// varsa o kullanılır; yoksa ad video dosyasından türetilir ("17.mp4" -> "Reel 17").
+/// Böylece aynı video her yerde aynı adla görünür.
+String reelBasligi(dynamic sahne) {
+  for (final anahtar in const ['baslik', 'title', 'kaynak', 'ad', 'name']) {
+    final String deger = alan(sahne, anahtar);
+    if (deger.isNotEmpty) return deger;
+  }
+  final String son = urlSonParcasi(alan(sahne, 'videoUrl'));
+  String ad = son;
+  try {
+    ad = Uri.decodeComponent(son);
+  } catch (_) {
+    // Bozuk kodlanmış ad olduğu gibi kullanılır.
+  }
+  ad = ad.replaceAll(RegExp(r'\.[A-Za-z0-9]+$'), '').replaceAll(RegExp(r'[_\-]+'), ' ').trim();
+  if (ad.isEmpty) return 'Reel';
+  return int.tryParse(ad) != null ? 'Reel $ad' : ad;
+}
 
 // ==========================================
 // FAVORİ VİDEOLAR EKRANI
 // ==========================================
-class FavorilerEkrani extends StatelessWidget {
+class FavorilerEkrani extends StatefulWidget {
   const FavorilerEkrani({super.key});
+
+  @override
+  State<FavorilerEkrani> createState() => _FavorilerEkraniState();
+}
+
+class _FavorilerEkraniState extends State<FavorilerEkrani> {
+  Future<void> _adiDegistir(Map<String, dynamic> sahne) async {
+    final denetleyici = TextEditingController(text: reelBasligi(sahne));
+    final String? yeniAd = await showDialog<String>(
+      context: context,
+      builder: (diyalog) => AlertDialog(
+        title: const Text("Videoya ad ver"),
+        content: TextField(
+          controller: denetleyici,
+          autofocus: true,
+          maxLength: 40,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(hintText: "Örn. Friends – kahve sahnesi"),
+          onSubmitted: (deger) => Navigator.of(diyalog).pop(deger),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(diyalog).pop(), child: const Text("Vazgeç")),
+          TextButton(onPressed: () => Navigator.of(diyalog).pop(denetleyici.text), child: const Text("Kaydet")),
+        ],
+      ),
+    );
+    denetleyici.dispose();
+    if (yeniAd == null || !mounted) return;
+    setState(() {
+      // Boş bırakılırsa ad yeniden video dosyasından türetilir.
+      if (yeniAd.trim().isEmpty) {
+        sahne.remove('baslik');
+      } else {
+        sahne['baslik'] = yeniAd.trim();
+      }
+    });
+    await favorileriKaydet();
+  }
+
+  void _sil(Map<String, dynamic> sahne) {
+    setState(() => globalFavoriSahneler.remove(sahne));
+    favorileriKaydet();
+  }
+
+  Future<void> _oynat(int index) async {
+    await Navigator.push(context, MaterialPageRoute(builder: (context) => FilmKesitleriEkrani(ozelListe: List.of(globalFavoriSahneler), baslangicIndex: index)));
+    // Oynatıcıda favoriden çıkarılmış olabilir.
+    if (mounted) setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -34,7 +107,7 @@ class FavorilerEkrani extends StatelessWidget {
                 const SizedBox(height: 20),
                 Text("No favorites yet.", style: GoogleFonts.poppins(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)),
                 const SizedBox(height: 10),
-                Text("Double tap videos to save them here!", textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.white54))
+                const Text("Double tap videos to save them here!", textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.white54))
               ]
             )
           )
@@ -44,7 +117,9 @@ class FavorilerEkrani extends StatelessWidget {
             physics: const BouncingScrollPhysics(),
             itemBuilder: (context, index) {
               final sahne = globalFavoriSahneler[index];
+              final String url = alan(sahne, "videoUrl");
               return Container(
+                key: ValueKey(url),
                 margin: const EdgeInsets.only(bottom: 15),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.05),
@@ -52,30 +127,99 @@ class FavorilerEkrani extends StatelessWidget {
                   border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
                 ),
                 child: ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-                  leading: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(color: Colors.pinkAccent.withValues(alpha: 0.2), shape: BoxShape.circle),
-                    child: const Icon(Icons.play_arrow_rounded, color: Colors.pinkAccent)
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  // Videonun ilk karesi: ad ile içerik birbirine karışmasın.
+                  leading: _ReelOnizleme(url: url),
+                  title: Text(reelBasligi(sahne), style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                  subtitle: Text("Tap to watch", style: GoogleFonts.poppins(color: Colors.white38, fontSize: 12)),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: "Adını değiştir",
+                        icon: const Icon(Icons.edit_rounded, color: Colors.white54, size: 22),
+                        onPressed: () => _adiDegistir(sahne),
+                      ),
+                      IconButton(
+                        tooltip: "Favorilerden çıkar",
+                        icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 26),
+                        onPressed: () => _sil(sahne),
+                      ),
+                    ],
                   ),
-                  title: Text(sahne["kaynak"] ?? "Reels Video ${index + 1}", style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 28),
-                    onPressed: () {
-                      if (index < globalFavoriSahneler.length) globalFavoriSahneler.removeAt(index);
-                      favorileriKaydet();
-                      Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (context, animation1, animation2) => const FavorilerEkrani(), transitionDuration: Duration.zero));
-                    }
-                  ),
-                  onTap: () async {
-                    await Navigator.push(context, MaterialPageRoute(builder: (context) => FilmKesitleriEkrani(ozelListe: List.of(globalFavoriSahneler), baslangicIndex: index)));
-                    if (!context.mounted) return;
-                    Navigator.pushReplacement(context, PageRouteBuilder(pageBuilder: (context, animation1, animation2) => const FavorilerEkrani(), transitionDuration: Duration.zero));
-                  },
+                  onTap: () => _oynat(index),
                 ),
               );
             }
           ),
+    );
+  }
+}
+
+/// Favori listesindeki küçük video önizlemesi (ilk kare, sessiz, oynatılmaz).
+class _ReelOnizleme extends StatefulWidget {
+  const _ReelOnizleme({required this.url});
+
+  final String url;
+
+  @override
+  State<_ReelOnizleme> createState() => _ReelOnizlemeState();
+}
+
+class _ReelOnizlemeState extends State<_ReelOnizleme> {
+  VideoPlayerController? _controller;
+  bool _hazir = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _yukle();
+  }
+
+  Future<void> _yukle() async {
+    final Uri? adres = Uri.tryParse(widget.url);
+    if (adres == null || !adres.hasScheme) return;
+    try {
+      final dosya = await VideoOnbellek.hazirDosya(widget.url);
+      if (!mounted) return;
+      final controller = dosya != null ? VideoPlayerController.file(dosya) : VideoPlayerController.networkUrl(adres);
+      _controller = controller;
+      await controller.setVolume(0);
+      await controller.initialize();
+      if (mounted) setState(() => _hazir = true);
+    } catch (e) {
+      debugPrint("Önizleme açılamadı: $e");
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = _controller;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: SizedBox(
+        width: 56,
+        height: 56,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Container(color: Colors.pinkAccent.withValues(alpha: 0.2)),
+            if (_hazir && controller != null)
+              FittedBox(
+                fit: BoxFit.cover,
+                clipBehavior: Clip.hardEdge,
+                child: SizedBox(width: controller.value.size.width, height: controller.value.size.height, child: VideoPlayer(controller)),
+              ),
+            const Center(child: Icon(Icons.play_arrow_rounded, color: Colors.white, size: 28, shadows: [Shadow(color: Colors.black87, blurRadius: 8)])),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -100,16 +244,22 @@ class _FilmKesitleriEkraniState extends State<FilmKesitleriEkrani> {
   bool _isLoading = true;
   String _hataMesaji = "";
   final Map<int, VideoPlayerController> _controllers = {};
+  // Oynatıcısı şu an kurulmakta olan videolar (aynı video iki kez kurulmasın).
+  final Set<int> _kuruluyor = {};
+  // Açılamayan videolar; ekranda "tekrar dene" gösterilir.
+  final Set<int> _hatali = {};
+  bool _kapandi = false;
 
   @override
   void initState() {
     super.initState();
+    unawaited(VideoOnbellek.temizle());
     if (widget.ozelListe != null) {
       _sahneler = widget.ozelListe!;
       _suankiIndex = widget.baslangicIndex;
       _pageController = PageController(initialPage: _suankiIndex);
       _isLoading = false;
-      _videolariPreload();
+      _videolariHazirla();
     } else {
       _suankiIndex = 0;
       _pageController = PageController(initialPage: 0);
@@ -117,31 +267,67 @@ class _FilmKesitleriEkraniState extends State<FilmKesitleriEkrani> {
     }
   }
 
-  void _videolariPreload() {
-    final int targetIndex = _suankiIndex;
-    // Mevcut, bir önceki ve sonraki 2 videoyu önceden yükle
-    for (int i = targetIndex - 1; i <= targetIndex + 2; i++) {
-      if (i >= 0 && i < _sahneler.length) {
-        if (!_controllers.containsKey(i)) {
-          final Uri? adres = Uri.tryParse(alan(_sahneler[i], "videoUrl"));
-          if (adres == null || !adres.hasScheme) continue;
-          final controller = VideoPlayerController.networkUrl(adres);
-          _controllers[i] = controller;
-          controller.initialize().then((_) {
-            if (mounted) setState(() {});
-          }).catchError((Object e) {
-            debugPrint("Video açılamadı: $e");
-          });
-        }
-      }
-    }
+  String _url(int i) => alan(_sahneler[i], "videoUrl");
 
-    // Çok uzaktaki videoların controller'larını temizle (bellek tasarrufu için)
-    final keysToRemove = _controllers.keys.where((k) => (k - targetIndex).abs() > 2).toList();
-    for (int k in keysToRemove) {
-      _controllers[k]?.dispose();
-      _controllers.remove(k);
+  /// Ekrandaki ve bir sonraki videonun oynatıcısını hazırlar, uzaktakileri kapatır.
+  ///
+  /// Aynı anda en fazla üç oynatıcı açık kalır (önceki, şimdiki, sonraki). Daha fazlası
+  /// telefonun video çözücülerini ve interneti paylaştırıp oynatmayı takılmalı hâle getirir.
+  void _videolariHazirla() {
+    final int hedef = _suankiIndex;
+    for (final int k in _controllers.keys.where((k) => (k - hedef).abs() > 1).toList()) {
+      _controllers.remove(k)?.dispose();
     }
+    _oynaticiKur(hedef);
+    _siradakileriIndir(hedef);
+  }
+
+  /// Sıradaki iki videoyu telefona indirir; inen video dosyadan, yani takılmadan oynar.
+  Future<void> _siradakileriIndir(int hedef) async {
+    for (final int i in [hedef + 1, hedef + 2]) {
+      if (_kapandi || hedef != _suankiIndex) return;
+      if (i < 0 || i >= _sahneler.length) continue;
+      if (!kIsWeb) await VideoOnbellek.indir(_url(i));
+      if (_kapandi || hedef != _suankiIndex) return;
+      if (i == hedef + 1) await _oynaticiKur(i);
+    }
+  }
+
+  Future<void> _oynaticiKur(int i) async {
+    if (i < 0 || i >= _sahneler.length || _controllers.containsKey(i) || _kuruluyor.contains(i)) return;
+    final Uri? adres = Uri.tryParse(_url(i));
+    if (adres == null || !adres.hasScheme) {
+      if (mounted) setState(() => _hatali.add(i));
+      return;
+    }
+    _kuruluyor.add(i);
+    VideoPlayerController? controller;
+    try {
+      final dosya = await VideoOnbellek.hazirDosya(_url(i));
+      // Beklerken ekran kapandıysa ya da kullanıcı uzaklaştıysa oynatıcı açılmaz.
+      if (_kapandi || (i - _suankiIndex).abs() > 1) return;
+      controller = dosya != null ? VideoPlayerController.file(dosya) : VideoPlayerController.networkUrl(adres);
+      _controllers[i] = controller;
+      _hatali.remove(i);
+      if (mounted) setState(() {});
+      await controller.initialize();
+    } catch (e) {
+      debugPrint("Video açılamadı: $e");
+      if (controller != null && identical(_controllers[i], controller)) {
+        _controllers.remove(i);
+        controller.dispose();
+      }
+      _hatali.add(i);
+    } finally {
+      _kuruluyor.remove(i);
+      if (mounted) setState(() {});
+    }
+  }
+
+  void _tekrarDene(int i) {
+    _controllers.remove(i)?.dispose();
+    setState(() => _hatali.remove(i));
+    _oynaticiKur(i);
   }
 
   Future<void> _videolariGetir() async {
@@ -153,7 +339,7 @@ class _FilmKesitleriEkraniState extends State<FilmKesitleriEkrani> {
         final List<dynamic> gelenVeri = jsonListeCoz(response).where((satir) => alan(satir, "videoUrl").isNotEmpty).toList();
         gelenVeri.shuffle();
         setState(() { _sahneler = gelenVeri; _isLoading = false; });
-        _videolariPreload();
+        _videolariHazirla();
       } else {
         setState(() { _hataMesaji = "Sunucu Hatası: ${response.statusCode}"; _isLoading = false; });
       }
@@ -165,6 +351,7 @@ class _FilmKesitleriEkraniState extends State<FilmKesitleriEkrani> {
 
   @override
   void dispose() {
+    _kapandi = true;
     _pageController?.dispose();
     for (var controller in _controllers.values) {
       controller.dispose();
@@ -206,12 +393,11 @@ class _FilmKesitleriEkraniState extends State<FilmKesitleriEkrani> {
       body: PageView.builder(
         controller: _pageController,
         scrollDirection: Axis.vertical,
-        // DÜZELTME 1: Orijinal ve stabil kaydırma fiziğine geri döndük. "Mıknatıs" gibi oturacak.
         physics: const PageScrollPhysics(),
         itemCount: _sahneler.length,
         onPageChanged: (index) {
           setState(() { _suankiIndex = index; });
-          _videolariPreload();
+          _videolariHazirla();
         },
         itemBuilder: (context, index) {
           final sahne = _sahneler[index];
@@ -222,6 +408,8 @@ class _FilmKesitleriEkraniState extends State<FilmKesitleriEkrani> {
             isFocused: _suankiIndex == index,
             isFavori: isFavori,
             controller: _controllers[index],
+            hatali: _hatali.contains(index),
+            onTekrarDene: () => _tekrarDene(index),
             onFavoriToggle: () {
               setState(() {
                 if (isFavori) { globalFavoriSahneler.removeWhere((f) => f["videoUrl"] == sahne["videoUrl"]); }
@@ -246,7 +434,11 @@ class ReelsVideoOgesi extends StatefulWidget {
   final VoidCallback onFavoriToggle;
   final VideoPlayerController? controller;
 
-  const ReelsVideoOgesi({super.key, required this.sahne, required this.isFocused, required this.isFavori, required this.onFavoriToggle, this.controller});
+  /// Video açılamadı; yükleniyor göstergesi yerine "tekrar dene" gösterilir.
+  final bool hatali;
+  final VoidCallback? onTekrarDene;
+
+  const ReelsVideoOgesi({super.key, required this.sahne, required this.isFocused, required this.isFavori, required this.onFavoriToggle, this.controller, this.hatali = false, this.onTekrarDene});
 
   @override
   State<ReelsVideoOgesi> createState() => _ReelsVideoOgesiState();
@@ -256,6 +448,8 @@ class _ReelsVideoOgesiState extends State<ReelsVideoOgesi> with SingleTickerProv
   VideoPlayerController? _controller;
   bool _isPlayerReady = false;
   bool _sesAcik = true;
+  // Oynarken internet beklendiği için video durduysa küçük bir gösterge çıkar.
+  bool _bekliyor = false;
 
   // Animasyon Değişkenleri
   bool _ekrandaIkonGoster = false;
@@ -266,24 +460,25 @@ class _ReelsVideoOgesiState extends State<ReelsVideoOgesi> with SingleTickerProv
     super.initState();
     _controller = widget.controller;
     if (_controller != null) {
+      _controller!.addListener(_listener);
       if (_controller!.value.isInitialized) {
         _isPlayerReady = true;
         _setupController();
-      } else {
-        _controller!.addListener(_listener);
       }
     }
   }
 
   void _listener() {
-    if (_controller != null && _controller!.value.isInitialized && !_isPlayerReady) {
-      if (mounted) {
-        setState(() {
-          _isPlayerReady = true;
-        });
-        _setupController();
-      }
+    final controller = _controller;
+    if (controller == null || !mounted) return;
+    final deger = controller.value;
+    if (deger.isInitialized && !_isPlayerReady) {
+      setState(() => _isPlayerReady = true);
+      _setupController();
     }
+    // Yalnızca durum değişince yeniden çizilir; her kare için değil.
+    final bool bekliyor = deger.isInitialized && deger.isBuffering && deger.isPlaying;
+    if (bekliyor != _bekliyor) setState(() => _bekliyor = bekliyor);
   }
 
   void _setupController() {
@@ -304,11 +499,9 @@ class _ReelsVideoOgesiState extends State<ReelsVideoOgesi> with SingleTickerProv
       _controller?.removeListener(_listener);
       _controller = widget.controller;
       _isPlayerReady = _controller?.value.isInitialized ?? false;
-      if (!_isPlayerReady) {
-        _controller?.addListener(_listener);
-      } else {
-        _setupController();
-      }
+      _bekliyor = false;
+      _controller?.addListener(_listener);
+      if (_isPlayerReady) _setupController();
     }
 
     if (widget.isFocused && !oldWidget.isFocused) {
@@ -397,15 +590,39 @@ class _ReelsVideoOgesiState extends State<ReelsVideoOgesi> with SingleTickerProv
           ),
         ),
 
-        // Yükleniyor Göstergesi
-        if (!_isPlayerReady)
+        // Yükleniyor Göstergesi (açılamadıysa: tekrar dene)
+        if (widget.hatali)
+          Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.videocam_off_rounded, color: Colors.white54, size: 56),
+                const SizedBox(height: 12),
+                Text("Video açılamadı.", style: GoogleFonts.poppins(color: Colors.white70, fontSize: 15)),
+                const SizedBox(height: 12),
+                ElevatedButton.icon(
+                  onPressed: widget.onTekrarDene,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text("Tekrar dene"),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.white12, foregroundColor: Colors.white),
+                ),
+              ],
+            ),
+          )
+        else if (!_isPlayerReady)
           const Center(child: CircularProgressIndicator(color: Colors.pinkAccent)),
 
+        if (_bekliyor)
+          const Positioned(
+            top: 100, left: 0, right: 0,
+            child: Center(child: SizedBox(width: 26, height: 26, child: CircularProgressIndicator(color: Colors.white70, strokeWidth: 2.5))),
+          ),
+
         // EKRAN ORTASI BÜYÜK İKON ANİMASYONU
-        Center(
+        IgnorePointer(child: Center(
           child: AnimatedOpacity(
             duration: const Duration(milliseconds: 300),
-            opacity: _ekrandaIkonGoster || (!_isPlayerReady ? false : !_controller!.value.isPlaying) ? 1.0 : 0.0,
+            opacity: _ekrandaIkonGoster ? 1.0 : 0.0,
             child: AnimatedScale(
               duration: const Duration(milliseconds: 300),
               scale: _ekrandaIkonGoster ? 1.2 : 1.0,
@@ -417,16 +634,31 @@ class _ReelsVideoOgesiState extends State<ReelsVideoOgesi> with SingleTickerProv
               ),
             ),
           ),
-        ),
+        )),
 
         // ALT KARARTMA (Menü Çakışmasını Önlemek İçin)
-        Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.bottomCenter, end: Alignment.center,
-              colors: [Colors.black.withValues(alpha: 0.6), Colors.transparent]
+        IgnorePointer(
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.bottomCenter, end: Alignment.center,
+                colors: [Colors.black.withValues(alpha: 0.6), Colors.transparent]
+              )
             )
-          )
+          ),
+        ),
+
+        // VİDEONUN ADI (favorilerde de aynı adla görünür)
+        Positioned(
+          left: 18, right: 90, bottom: 46,
+          child: IgnorePointer(
+            child: Text(
+              reelBasligi(widget.sahne),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.poppins(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600, shadows: [const Shadow(color: Colors.black, blurRadius: 6)]),
+            ),
+          ),
         ),
 
         // SAĞ ALT BUTONLAR (Favori & Ses)

@@ -6,6 +6,7 @@ import 'giris_ekrani.dart';
 import 'hesap_servisi.dart';
 import 'mesaj_servisi.dart';
 import 'profil_ekrani.dart';
+import 'randevu_bolumu.dart';
 import 'sohbet_ekrani.dart';
 
 // ==========================================
@@ -577,13 +578,16 @@ class EgitmenPaneliEkrani extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 24),
+          // Eğitmenin kendi eklediği öğrenciler ve haftalık speaking randevuları.
+          RandevuBolumu(egitmenId: egitmen.uid),
+          const SizedBox(height: 24),
           _Akis<List<Kullanici>>(
             olustur: HesapServisi.ogrencilerimiIzle,
             veri: (context, ogrenciler) => Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Öğrencilerim (${ogrenciler.length})',
+                  'Beni seçen öğrenciler (${ogrenciler.length})',
                   style: hesapYazi(boyut: 17, kalinlik: FontWeight.w600),
                 ),
                 const SizedBox(height: 12),

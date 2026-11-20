@@ -12,4 +12,4 @@ const bool claudeYedekDestekli = !bool.fromEnvironment('CLAUDE_YEDEK_KAPALI') &&
 const String pixabayApiKey = String.fromEnvironment('PIXABAY_API_KEY');
 
 // pubspec.yaml içindeki "version" ile aynı tutulmalı (güncelleme kontrolü bunu kullanır).
-const String uygulamaSurumu = "1.1.0";
+const String uygulamaSurumu = "1.1.1";
