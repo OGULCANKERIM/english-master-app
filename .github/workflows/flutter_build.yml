@@ -2,7 +2,11 @@ name: English Master Otomatik Derleme
 
 on:
   push:
-    branches: [ "main" ]
+    # "birlestirme" dalinda APK yalnizca derlenir ve indirilebilir (Artifact) olur;
+    # testerlara dagitim sadece "main" dalinda yapilir (asagidaki son adim).
+    branches: [ "main", "birlestirme" ]
+  # GitHub > Actions sayfasindan elle de calistirilabilir.
+  workflow_dispatch:
 
 jobs:
   apk_olustur:
@@ -47,6 +51,8 @@ jobs:
           path: build/app/outputs/flutter-apk/app-release.apk
  
       - name: Firebase App Distribution'a Yukle
+        # Deneme dallarindan testerlara surum gitmez.
+        if: github.ref == 'refs/heads/main'
         uses: w9jds/firebase-action@master
         with:
           args: appdistribution:distribute build/app/outputs/flutter-apk/app-release.apk --app ${{ secrets.FIREBASE_APP_ID }} --groups testerlar
