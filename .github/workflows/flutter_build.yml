@@ -2,8 +2,7 @@ name: English Master Otomatik Derleme
 
 on:
   push:
-    # "birlestirme" dalinda APK yalnizca derlenir ve indirilebilir (Artifact) olur;
-    # testerlara dagitim sadece "main" dalinda yapilir (asagidaki son adim).
+    # "birlestirme" deneme dalidir; APK burada da derlenir ve App Tester'a dagitilir.
     branches: [ "main", "birlestirme" ]
   # GitHub > Actions sayfasindan elle de calistirilabilir.
   workflow_dispatch:
@@ -51,8 +50,10 @@ jobs:
           path: build/app/outputs/flutter-apk/app-release.apk
  
       - name: Firebase App Distribution'a Yukle
-        # Deneme dallarindan testerlara surum gitmez.
-        if: github.ref == 'refs/heads/main'
+        # "testerlar" grubunda yalnizca uygulama sahibi var; deneme dalindaki surum de
+        # App Tester'a gider. Gruba baska kisi eklenirse deneme dali icin ayri grup acilmali.
+        # Elle baslatilan (workflow_dispatch) baska dallardan dagitim yapilmaz.
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/birlestirme'
         uses: w9jds/firebase-action@master
         with:
           args: appdistribution:distribute build/app/outputs/flutter-apk/app-release.apk --app ${{ secrets.FIREBASE_APP_ID }} --groups testerlar
